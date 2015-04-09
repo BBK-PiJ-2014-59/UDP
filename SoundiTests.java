@@ -7,17 +7,17 @@ public class SoundiTests {
   private final int firstClientId = 100;
 
   @Before
-  public void before { 
+  public void before() { 
     server = new SoundiServerImpl();
   }
 
   @Test
-  public void serverListensForTcp { 
+  public void serverListensForTcp() { 
     assertTrue(server.isListeningForTcp());
   }
 
   @Test
-  public void clientConnectsWithTcpAndGetsFirstId { 
+  public void clientConnectsWithTcpAndGetsFirstId() { 
     client1 = new SoundiClientImpl();
     assertEquals(firstClientId, client1.getId());
   }
