@@ -1,6 +1,7 @@
 import org.junit.*;
 import static org.junit.Assert.*;
 import java.net.ConnectException;
+import java.io.IOException;
 
 
 
@@ -11,11 +12,11 @@ public class SoundiTests {
   private static final int firstClientId = 100;
   private static final int badTcpPort= 5555;
 
+
   @Before
   public void before() { 
     server = new SoundiServerImpl();
     client1 = new SoundiClientImpl();
-    badClient = new SoundiClientImpl(badTcpPort); // Connect with TCP using non-default port
   }
 
   // meaningless test?
@@ -31,8 +32,10 @@ public class SoundiTests {
     assertEquals(firstClientId, client1.getId());
   }
 
-  @Test (expected=ConnectException.class)
-  public void clientCantConnectWithTcp() { 
+  //@Test (expected=IOException.class)
+  @Test (expected=Exception.class)
+  public void clientCantConnectWithTcpToBadPortOnLocalhost() { 
+    badClient = new SoundiClientImpl("localhost", badTcpPort);
     badClient.connectTcp();
   }
 
