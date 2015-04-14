@@ -1,13 +1,20 @@
 import java.io.*;
 import java.net.*;
 
+import static util.SoundUtil.*;
+
 public class SoundClient { 
+
+  private static String clientName = "SoundClient";
 
   private String host;
   private int port;
 
   private static String defaultHost = "localhost";
   private static int defaultPort = 789;
+
+  int id;
+  private static int defaultId = 0;
 
   BufferedReader br;
   PrintWriter pw;
@@ -21,9 +28,10 @@ public class SoundClient {
   public SoundClient(String host, int port) {
     this.host = host;
     this.port = port;
+    id = defaultId;
   }
 
-  public void connectTcp() { 
+  private void connectTcp() { 
 
     // Set up socket
 
@@ -38,29 +46,48 @@ public class SoundClient {
     }
   }
 
-  public void setUpTcpIo() { 
+  private void setUpTcpIo() { 
 
     // Set up I/O over socket 
 
     try { 
       isr = new InputStreamReader(sock.getInputStream());
       br = new BufferedReader(isr);
-      pw = new PrintWriter(sock.getOutputStream(), true);
+      //pw = new PrintWriter(sock.getOutputStream(), true); // true autoFlushes output buffer
+      pw = new PrintWriter(sock.getOutputStream());
     } catch (IOException e) { 
       e.printStackTrace();
     }
   }
 
-  public int getId() { 
-    return 0;
+  private int getId() { 
+    return id;
   }
 
-  public void requestAndSetId() { 
-
+  private void requestAndSetId() { 
+    log("Requesting ID from server.");
+    if (pw != null) { 
+      pw.println("ID");   
+      try { 
+        id = Integer.parseInt(br.readLine()); // todo: make sure this is an int
+      } catch (IOException e) { 
+        e.printStackTrace(); 
+      }
+      log("ID received: " + getId());
+    } else { 
+      log("Can't get ID - no connection with server.");
+    }
   }
   
+  private static void log(String msg) { 
+    logger(clientName, msg);
+  }
+
   public static void main(String[] args) { 
-    SoundClient sc = new SoundClient();  
-    sc.connectTcp();
+    SoundClient soundClient = new SoundClient();  
+    soundClient.connectTcp();
+    soundClient.requestAndSetId();
+
+
   }
 }
