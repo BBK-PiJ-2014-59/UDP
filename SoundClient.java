@@ -54,7 +54,7 @@ public class SoundClient {
       isr = new InputStreamReader(sock.getInputStream());
       br = new BufferedReader(isr);
       //pw = new PrintWriter(sock.getOutputStream(), true); // true autoFlushes output buffer
-      pw = new PrintWriter(sock.getOutputStream());
+      pw = new PrintWriter(sock.getOutputStream(), true);
     } catch (IOException e) { 
       e.printStackTrace();
     }
@@ -65,17 +65,24 @@ public class SoundClient {
   }
 
   private void requestAndSetId() { 
-    log("Requesting ID from server.");
     if (pw != null) { 
-      pw.println("ID");   
+      String request = "ID";
+      log("Requesting " + request + " from server.");
+      pw.println(request);   
+      String reply = null;
       try { 
-        id = Integer.parseInt(br.readLine()); // todo: make sure this is an int
+        reply = br.readLine();
       } catch (IOException e) { 
         e.printStackTrace(); 
       }
-      log("ID received: " + getId());
+      if (reply != null) { 
+        id = Integer.parseInt(reply); 
+        log(request + " received: " + getId());
+      } else { 
+        log("Got null reply from server when requesting " + request);
+      }
     } else { 
-      log("Can't get ID - no connection with server.");
+      log("Can't request ID - no IO stream set up with server.");
     }
   }
   
@@ -86,6 +93,7 @@ public class SoundClient {
   public static void main(String[] args) { 
     SoundClient soundClient = new SoundClient();  
     soundClient.connectTcp();
+    soundClient.setUpTcpIo();
     soundClient.requestAndSetId();
 
 

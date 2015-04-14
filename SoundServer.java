@@ -42,27 +42,29 @@ public class SoundServer {
     try { 
       isr = new InputStreamReader(socket.getInputStream());
       br = new BufferedReader(isr);
-      pw = new PrintWriter(socket.getOutputStream());
+      pw = new PrintWriter(socket.getOutputStream(), true);
     } catch (IOException e) { 
       e.printStackTrace();
     }
   }
 
   void sendClientId() { 
-    log("Waiting for ID request from client.");
+    String expected = "ID";
+    String request = null;
+    log("Waiting for '" + expected + "' request from client.");
     try { 
-      String cmd = br.readLine();
+      request = br.readLine();
     } catch (IOException e) { 
       e.printStackTrace();
     }
-    log("ID request from client received.");
-    String request = null;
+    log("Message from client received.");
     int id = nextTcpId();
-    if (request == "ID") { 
+    if (request.startsWith(expected)) { 
+      log("Message from client was as expected.");
       pw.println(id);
       log("Sent this ID to client: " + id);
     } else { 
-      log("Expected ID request from client but got this instead: " + request);
+      log("Client sent this instead of '" + expected + "': " + request);
     }
   }
 
