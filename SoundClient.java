@@ -13,13 +13,13 @@ public class SoundClient {
   private static String defaultHost = "localhost";
   private static int defaultPort = 789;
 
-  int id;
+  private int id;
   private static int defaultId = 0;
 
-  BufferedReader br;
-  PrintWriter pw;
-  Socket sock;
-  InputStreamReader isr;
+  private BufferedReader br;
+  private PrintWriter pw;
+  private Socket sock;
+  private InputStreamReader isr;
 
   public SoundClient() {
     this(defaultHost, defaultPort);
@@ -35,6 +35,7 @@ public class SoundClient {
 
     // Set up socket
 
+    log("Setting up TCP connection with server.");
     try { 
       sock = new Socket(host, port);
     } catch (ConnectException e) { // Connection refused
@@ -50,6 +51,7 @@ public class SoundClient {
 
     // Set up I/O over socket 
 
+    log("Setting up TCP IO streams with server.");
     try { 
       isr = new InputStreamReader(sock.getInputStream());
       br = new BufferedReader(isr);
@@ -95,6 +97,7 @@ public class SoundClient {
     soundClient.connectTcp();
     soundClient.setUpTcpIo();
     soundClient.requestAndSetId();
+    //soundClient.requestAndSetRole();
 
 
   }
