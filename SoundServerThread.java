@@ -23,8 +23,6 @@ public class SoundServerThread extends Thread {
 
   public void run() { 
     setUpTcpIo();
-    //sendClientId();
-    //sendClientRole();
     expectAndSend("ID", tcpClientId.toString());
     expectAndSend("ROLE", clientRole);
   }
@@ -40,40 +38,10 @@ public class SoundServerThread extends Thread {
     }
   }
 
-  private void sendClientId() {
-    String expected = "ID";
-    String request = null;
-    log("Waiting for '" + expected + "' request from client.");
-    request = tcpGet();
-    log("Message from client received.");
-    if (request.startsWith(expected)) {
-      log("Message from client was as expected.");
-      pw.println(tcpClientId);
-      log("Sent this " + expected + " to client: " + tcpClientId);
-    } else {
-      log("Client sent this instead of '" + expected + "': " + request);
-    }
-  }
-
-  private void sendClientRole() {
-    String expected = "ROLE";
-    String request = null;
-    log("Waiting for '" + expected + "' request from client.");
-    request = tcpGet();
-    log("Message from client received.");
-    if (request.startsWith(expected)) {
-      log("Message from client was as expected.");
-      pw.println(clientRole);
-      log("Sent this " + expected + " to client: " + clientRole);
-    } else {
-      log("Client sent this instead of '" + expected + "': " + request);
-    }
-  }
-
   private void expectAndSend(String expected, String sendThis) { 
     String request = null;
     log("Waiting for '" + expected + "' request from client.");
-    request = tcpGet();
+    request = tcpListen();
     log("Message from client received.");
     if (request.startsWith(expected)) {
       log("Message from client was as expected.");
@@ -84,7 +52,7 @@ public class SoundServerThread extends Thread {
     }
   }
 
-  private String tcpGet() { 
+  private String tcpListen() { 
     String msg = null;
     try {
       msg = br.readLine();

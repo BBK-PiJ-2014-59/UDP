@@ -16,12 +16,16 @@ public class SoundClient {
   private int id;
   private static int defaultId = 0;
 
-  private String role;
+  private String role; // todo: use enum/check for valid role reply from server.
 
   private BufferedReader br;
   private PrintWriter pw;
   private Socket sock;
   private InputStreamReader isr;
+
+  private DatagramSocket dgSock;
+  //private InetAddress remoteHost;
+  private final static int udpPort = 986;
 
   public SoundClient() {
     this(defaultHost, defaultPort);
@@ -32,6 +36,32 @@ public class SoundClient {
     this.port = port;
     id = defaultId;
     role = null;
+  }
+
+  public static void main(String[] args) { 
+
+    SoundClient soundClient = new SoundClient();  
+
+    soundClient.connectTcp();
+    soundClient.setUpTcpIo();
+    soundClient.requestAndSetId();
+    soundClient.requestAndSetRole();
+
+    soundClient.setUpUdp();
+    //soundClient.sendUdp("test");
+
+  }
+
+  private void setUpUdp() { 
+    try { 
+      dgSock = new DatagramSocket();
+    } catch (IOException e) { 
+      e.printStackTrace();
+    }
+  }
+
+  private void sendUdp(String msg) { 
+    byte[] bytes = msg.getBytes();
   }
 
   private void connectTcp() { 
@@ -111,18 +141,9 @@ public class SoundClient {
     return reply;
   }
 
+
   private static void log(String msg) { 
     logger(clientName, msg);
   }
 
-  public static void main(String[] args) { 
-
-    SoundClient soundClient = new SoundClient();  
-
-    soundClient.connectTcp();
-    soundClient.setUpTcpIo();
-    soundClient.requestAndSetId();
-    soundClient.requestAndSetRole();
-
-  }
 }
