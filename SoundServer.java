@@ -14,12 +14,14 @@ public class SoundServer {
   private int nextTcpClientId;
   private final static int firstUdpPort = 42001;
   private int nextUdpPort;
+  private boolean isFirstClient;
 
   public SoundServer() { 
     defaultTcpPort = 789;
     firstTcpClientId = 1;
     nextTcpClientId = firstTcpClientId;
     nextUdpPort = firstUdpPort;
+    isFirstClient = true;
   }
 
   private int nextTcpClientId() { 
@@ -34,10 +36,21 @@ public class SoundServer {
     log("Creating TCP socket.");
     serverSocket = new ServerSocket(defaultTcpPort); 
     log("Listening for TCP client.");
+
+    // A thread handles each client. First client will end up sender.
+
+    Socket socket = serverSocket.accept();
+    log("Connection with client established.");
+    new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient).start();
+
+    isFirstClient = false;
+
+    // Subsequent clients will be receivers (at least start out that way).
+
     while(true) { 
-      Socket socket = serverSocket.accept();
+      socket = serverSocket.accept();
       log("Connection with client established.");
-      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort()).start();
+      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient).start();
     }
   }
 

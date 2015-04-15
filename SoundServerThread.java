@@ -9,7 +9,8 @@ public class SoundServerThread extends Thread {
 
   private Socket tcpSocket;
   private Integer tcpClientId;
-  private String clientRole;
+  private ClientRole clientRole;
+  private boolean isFirstClient;
 
   private BufferedReader br;
   private PrintWriter pw;
@@ -19,19 +20,26 @@ public class SoundServerThread extends Thread {
   private Integer udpPort;
   private boolean udpIsUp;
 
-  SoundServerThread(Socket s, int id, int port) { 
+  private enum ClientRole { 
+    SENDER,
+    RECEIVER
+  }
+
+  SoundServerThread(Socket s, int id, int port, boolean isFirst) { 
     tcpSocket = s;
     tcpClientId = id; 
     udpPort = port;
-    clientRole = "sender";
+    isFirstClient = isFirst;
+    clientRole = isFirstClient ? ClientRole.SENDER : ClientRole.RECEIVER;   
     udpIsUp = false;
+
     log("Initialized to listen on UDP port " + udpPort);
   }
 
   public void run() { 
     setUpTcpIo();
     expectAndSend("ID", tcpClientId.toString());
-    expectAndSend("ROLE", clientRole);
+    expectAndSend("ROLE", clientRole.toString());
     expectAndSend("UDP_PORT", udpPort.toString());
     setUpUdp();
 
