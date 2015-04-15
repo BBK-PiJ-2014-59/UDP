@@ -16,6 +16,8 @@ public class SoundClient {
   private int id;
   private static int defaultId = 0;
 
+  private String role;
+
   private BufferedReader br;
   private PrintWriter pw;
   private Socket sock;
@@ -29,6 +31,7 @@ public class SoundClient {
     this.host = host;
     this.port = port;
     id = defaultId;
+    role = null;
   }
 
   private void connectTcp() { 
@@ -66,39 +69,60 @@ public class SoundClient {
     return id;
   }
 
+  private String getRole() { 
+    return role;
+  }
+
   private void requestAndSetId() { 
+    String request = "ID";
+    String reply = tcpRequest(request);
+    if (reply != null) { 
+      id = Integer.parseInt(reply); 
+      log(request + " received: " + getId());
+    } else { 
+      log("Got null reply from server when requesting " + request);
+    }
+  }
+
+  private void requestAndSetRole() { 
+    String request = "ROLE";
+    String reply = tcpRequest(request);
+    if (reply != null) { 
+      role = reply; 
+      log(request + " received: " + getRole());
+    } else { 
+      log("Got null reply from server when requesting " + request);
+    }
+  }
+
+  private String tcpRequest(String request) { 
+    String reply = null;
     if (pw != null) { 
-      String request = "ID";
       log("Requesting " + request + " from server.");
       pw.println(request);   
-      String reply = null;
       try { 
         reply = br.readLine();
       } catch (IOException e) { 
         e.printStackTrace(); 
       }
-      if (reply != null) { 
-        id = Integer.parseInt(reply); 
-        log(request + " received: " + getId());
-      } else { 
-        log("Got null reply from server when requesting " + request);
-      }
     } else { 
-      log("Can't request ID - no IO stream set up with server.");
+      log("Can't request " + request + " - no IO stream set up with server.");
     }
+    return reply;
   }
-  
+
   private static void log(String msg) { 
     logger(clientName, msg);
   }
 
   public static void main(String[] args) { 
+
     SoundClient soundClient = new SoundClient();  
+
     soundClient.connectTcp();
     soundClient.setUpTcpIo();
     soundClient.requestAndSetId();
-    //soundClient.requestAndSetRole();
-
+    soundClient.requestAndSetRole();
 
   }
 }

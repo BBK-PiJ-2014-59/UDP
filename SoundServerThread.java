@@ -8,7 +8,8 @@ public class SoundServerThread extends Thread {
   private static String programName = "SoundServerThread";
 
   private Socket socket;
-  private int tcpClientId;
+  private Integer tcpClientId;
+  private String clientRole;
 
   private BufferedReader br;
   private PrintWriter pw;
@@ -17,11 +18,15 @@ public class SoundServerThread extends Thread {
   SoundServerThread(Socket s, int id) { 
     socket = s;
     tcpClientId = id; 
+    clientRole = "sender";
   }
 
   public void run() { 
     setUpTcpIo();
-    sendClientId();
+    //sendClientId();
+    //sendClientRole();
+    expectAndSend("ID", tcpClientId.toString());
+    expectAndSend("ROLE", clientRole);
   }
 
   private void setUpTcpIo() {
@@ -39,19 +44,54 @@ public class SoundServerThread extends Thread {
     String expected = "ID";
     String request = null;
     log("Waiting for '" + expected + "' request from client.");
-    try {
-      request = br.readLine();
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
+    request = tcpGet();
     log("Message from client received.");
     if (request.startsWith(expected)) {
       log("Message from client was as expected.");
       pw.println(tcpClientId);
-      log("Sent this ID to client: " + tcpClientId);
+      log("Sent this " + expected + " to client: " + tcpClientId);
     } else {
       log("Client sent this instead of '" + expected + "': " + request);
     }
+  }
+
+  private void sendClientRole() {
+    String expected = "ROLE";
+    String request = null;
+    log("Waiting for '" + expected + "' request from client.");
+    request = tcpGet();
+    log("Message from client received.");
+    if (request.startsWith(expected)) {
+      log("Message from client was as expected.");
+      pw.println(clientRole);
+      log("Sent this " + expected + " to client: " + clientRole);
+    } else {
+      log("Client sent this instead of '" + expected + "': " + request);
+    }
+  }
+
+  private void expectAndSend(String expected, String sendThis) { 
+    String request = null;
+    log("Waiting for '" + expected + "' request from client.");
+    request = tcpGet();
+    log("Message from client received.");
+    if (request.startsWith(expected)) {
+      log("Message from client was as expected.");
+      pw.println(sendThis);
+      log("Sent this " + expected + " to client: " + sendThis);
+    } else {
+      log("Client sent this instead of '" + expected + "': " + request);
+    }
+  }
+
+  private String tcpGet() { 
+    String msg = null;
+    try {
+      msg = br.readLine();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+    return msg;
   }
 
   private static void log(String msg) {
