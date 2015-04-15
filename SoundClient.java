@@ -23,9 +23,9 @@ public class SoundClient {
   private Socket sock;
   private InputStreamReader isr;
 
-  private DatagramSocket dgSock;
-  //private InetAddress remoteHost;
-  private final static int udpPort = 986;
+  private DatagramSocket udpSock;
+  private InetAddress udpHost;
+  private int udpPort;
 
   public SoundClient() {
     this(defaultHost, defaultPort);
@@ -46,23 +46,39 @@ public class SoundClient {
     soundClient.setUpTcpIo();
     soundClient.requestAndSetId();
     soundClient.requestAndSetRole();
+    soundClient.requestAndSetUdpPort();
 
     soundClient.setUpUdp();
-    //soundClient.sendUdp("test");
+    soundClient.udpSendString("test123");
 
   }
 
   private void setUpUdp() { 
     try { 
-      dgSock = new DatagramSocket();
+      udpSock = new DatagramSocket();
+    } catch (IOException e) { 
+      e.printStackTrace();
+    }
+    try { 
+      udpHost = InetAddress.getByName(defaultHost); // todo: get it working over the network.
+    } catch (UnknownHostException e) { 
+      e.printStackTrace();
+    }
+  }
+
+  private void udpSendString(String msg) { 
+    log("Sending string via UDP: " + msg );
+    byte[] bytes = msg.getBytes();
+    DatagramPacket packet = new DatagramPacket(bytes, bytes.length, udpHost, udpPort);
+    if (packet == null)
+      log("packet null"); 
+    try { 
+      udpSock.send(packet);
     } catch (IOException e) { 
       e.printStackTrace();
     }
   }
 
-  private void sendUdp(String msg) { 
-    byte[] bytes = msg.getBytes();
-  }
 
   private void connectTcp() { 
 
@@ -103,6 +119,10 @@ public class SoundClient {
     return role;
   }
 
+  private int getUdpPort() { 
+    return udpPort;
+  }
+
   private void requestAndSetId() { 
     String request = "ID";
     String reply = tcpRequest(request);
@@ -114,7 +134,18 @@ public class SoundClient {
     }
   }
 
-  private void requestAndSetRole() { 
+  private void requestAndSetUdpPort() { 
+    String request = "UDP_PORT";
+    String reply = tcpRequest(request);
+    if (reply != null) { 
+      udpPort = Integer.parseInt(reply); 
+      log(request + " received: " + getUdpPort());
+    } else { 
+      log("Got null reply from server when requesting " + request);
+    }
+  }
+
+  private void requestAndSetRole() {  // todo: DRY
     String request = "ROLE";
     String reply = tcpRequest(request);
     if (reply != null) { 

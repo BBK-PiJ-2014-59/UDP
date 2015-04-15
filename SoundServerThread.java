@@ -7,7 +7,7 @@ public class SoundServerThread extends Thread {
 
   private static String programName = "SoundServerThread";
 
-  private Socket socket;
+  private Socket tcpSocket;
   private Integer tcpClientId;
   private String clientRole;
 
@@ -15,24 +15,46 @@ public class SoundServerThread extends Thread {
   private PrintWriter pw;
   private InputStreamReader isr;
 
-  SoundServerThread(Socket s, int id) { 
-    socket = s;
+  private DatagramSocket udpSocket;
+  private Integer udpPort;
+  private boolean udpIsUp;
+
+  SoundServerThread(Socket s, int id, int port) { 
+    tcpSocket = s;
     tcpClientId = id; 
+    udpPort = port;
     clientRole = "sender";
+    udpIsUp = false;
+    log("Initialized to listen on UDP port " + udpPort);
   }
 
   public void run() { 
     setUpTcpIo();
     expectAndSend("ID", tcpClientId.toString());
     expectAndSend("ROLE", clientRole);
+    expectAndSend("UDP_PORT", udpPort.toString());
+    setUpUdp();
+
+    // test UDP
+
+    byte[] buffer = new byte[1000];
+    DatagramPacket packet = new DatagramPacket(buffer, buffer.length); 
+    try { 
+      udpSocket.receive(packet);
+    } catch (IOException e) { 
+      e.printStackTrace();
+    }
+    System.out.println(new String(packet.getData()));
+
+
   }
 
   private void setUpTcpIo() {
     log("Setting up TCP IO stream with client.");
     try {
-      isr = new InputStreamReader(socket.getInputStream());
+      isr = new InputStreamReader(tcpSocket.getInputStream());
       br = new BufferedReader(isr);
-      pw = new PrintWriter(socket.getOutputStream(), true);
+      pw = new PrintWriter(tcpSocket.getOutputStream(), true);
     } catch (IOException e) {
       e.printStackTrace();
     }
@@ -61,6 +83,19 @@ public class SoundServerThread extends Thread {
     }
     return msg;
   }
+
+  private void setUpUdp() {
+    if (!udpIsUp) { 
+      try {
+        udpSocket = new DatagramSocket(udpPort);
+        udpIsUp = true;
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+    }
+  }
+
+
 
   private static void log(String msg) {
     logger(programName, msg);

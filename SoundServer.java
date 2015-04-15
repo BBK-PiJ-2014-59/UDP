@@ -8,29 +8,36 @@ public class SoundServer {
   
   private static String programName = "SoundServer";
 
-  private int defaultPort;
+  private int defaultTcpPort;
   private ServerSocket serverSocket;
   private final int firstTcpClientId;
   private int nextTcpClientId;
+  private final static int firstUdpPort = 42001;
+  private int nextUdpPort;
 
   public SoundServer() { 
-    defaultPort = 789;
+    defaultTcpPort = 789;
     firstTcpClientId = 1;
     nextTcpClientId = firstTcpClientId;
+    nextUdpPort = firstUdpPort;
   }
 
   private int nextTcpClientId() { 
     return nextTcpClientId++; 
   }
 
+  private int nextUdpPort() { 
+    return nextUdpPort++; 
+  }
+
   void start() throws IOException { 
     log("Creating TCP socket.");
-    serverSocket = new ServerSocket(defaultPort); 
+    serverSocket = new ServerSocket(defaultTcpPort); 
     log("Listening for TCP client.");
     while(true) { 
       Socket socket = serverSocket.accept();
       log("Connection with client established.");
-      new SoundServerThread(socket, nextTcpClientId()).start();
+      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort()).start();
     }
   }
 
