@@ -25,6 +25,17 @@ public class SoundServerThread extends Thread {
     RECEIVER
   }
 
+  private enum Request { 
+    ID,
+    ROLE,
+    UDP_PORT
+  }
+
+  private MulticastSocket mcSocket; 
+  private InetAddress mcGroup;
+  private static String mcAddress = "224.111.111.111";
+  private static int mcPort = 4455;
+
   SoundServerThread(Socket s, int id, int port, boolean isFirst) { 
     tcpSocket = s;
     tcpClientId = id; 
@@ -38,23 +49,50 @@ public class SoundServerThread extends Thread {
 
   public void run() { 
     setUpTcpIo();
-    expectAndSend("ID", tcpClientId.toString());
-    expectAndSend("ROLE", clientRole.toString());
-    expectAndSend("UDP_PORT", udpPort.toString());
+    expectAndSend(Request.ID.toString(), tcpClientId.toString());
+    expectAndSend(Request.ROLE.toString(), clientRole.toString());
+    expectAndSend(Request.UDP_PORT.toString(), udpPort.toString());
     setUpUdp();
 
     // test UDP
 
     byte[] buffer = new byte[1000];
-    DatagramPacket packet = new DatagramPacket(buffer, buffer.length); 
+    DatagramPacket udpPacket = new DatagramPacket(buffer, buffer.length); 
     try { 
-      udpSocket.receive(packet);
+      udpSocket.receive(udpPacket);
     } catch (IOException e) { 
       e.printStackTrace();
     }
-    System.out.println(new String(packet.getData()));
+    System.out.println(new String(udpPacket.getData()));
 
+    // Send/receive via multicast
 
+    setUpMulticast();
+
+    // test multicast send
+
+    if (clientRole == ClientRole.SENDER) { 
+      DatagramPacket mcPacket = new DatagramPacket(new byte[0], 0, mcGroup, mcPort); 
+      byte[] bytes = ("multicast test").getBytes(); 
+      mcPacket.setData(bytes);
+      mcPacket.setLength(bytes.length);
+      try { 
+        mcSocket.send(mcPacket);
+      } catch (IOException e) { 
+        e.printStackTrace();
+      }
+    }
+  }
+
+  private void setUpMulticast() {
+    try { 
+      mcSocket = new MulticastSocket(); 
+      mcGroup = InetAddress.getByName(mcAddress);
+    } catch (UnknownHostException e) { 
+      e.printStackTrace();
+    } catch (IOException e) { 
+      e.printStackTrace();
+    }
   }
 
   private void setUpTcpIo() {
