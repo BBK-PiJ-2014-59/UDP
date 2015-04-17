@@ -61,7 +61,6 @@ public class SoundClient {
       try { 
         soundClient.log("Listening for multicast");
         soundClient.mcSocket.receive(mcPacket);
-        soundClient.log("yoda");
         System.out.println(new String(buf));
       } catch (IOException e) { 
         e.printStackTrace();
