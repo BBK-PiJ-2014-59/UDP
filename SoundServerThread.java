@@ -34,7 +34,7 @@ public class SoundServerThread extends Thread {
   private MulticastSocket mcSocket; 
   private InetAddress mcGroup;
   private static String mcAddress = "224.111.111.111";
-  private static int mcPort = 4455;
+  private static int mcPort = 10000;
 
   SoundServerThread(Socket s, int id, int port, boolean isFirst) { 
     tcpSocket = s;
@@ -67,24 +67,31 @@ public class SoundServerThread extends Thread {
 
     // Send/receive via multicast
 
-    setUpMulticast();
 
     // test multicast send
 
     if (clientRole == ClientRole.SENDER) { 
-      DatagramPacket mcPacket = new DatagramPacket(new byte[0], 0, mcGroup, mcPort); 
-      byte[] bytes = ("multicast test").getBytes(); 
-      mcPacket.setData(bytes);
-      mcPacket.setLength(bytes.length);
-      try { 
-        mcSocket.send(mcPacket);
-      } catch (IOException e) { 
-        e.printStackTrace();
+      setUpMulticast();
+      byte[] dummy = new byte[0];
+      DatagramPacket mcPacket = new DatagramPacket(dummy, 0, mcGroup, mcPort);
+      int i = 0;
+      while(true) { 
+        ++i;
+        byte[] bytes = ("multicast test " + i).getBytes(); 
+        mcPacket.setData(bytes);
+        mcPacket.setLength(bytes.length);
+        try { 
+          mcSocket.send(mcPacket);
+          log(""+i);
+        } catch (IOException e) { 
+          e.printStackTrace();
+        }
       }
     }
   }
 
   private void setUpMulticast() {
+    log("Setting up multicast.");
     try { 
       mcSocket = new MulticastSocket(); 
       mcGroup = InetAddress.getByName(mcAddress);
@@ -143,8 +150,8 @@ public class SoundServerThread extends Thread {
 
 
 
-  private static void log(String msg) {
-    logger(programName, msg);
+  private void log(String msg) {
+    logger(programName + "-" + getId(), msg);
   }
 
 }

@@ -13,7 +13,7 @@ public class SoundClient {
   private static String defaultHost = "localhost";
   private static int defaultPort = 789;
 
-  private int id;
+  private int id; // todo: make same as thread.getId();
   private static int defaultId = 0;
 
   private String role; // todo: use enum/check for valid role reply from server.
@@ -26,6 +26,11 @@ public class SoundClient {
   private DatagramSocket udpSock;
   private InetAddress udpHost;
   private int udpPort;
+
+  private MulticastSocket mcSocket;
+  private InetAddress mcGroup;
+  private static String mcAddress = "224.111.111.111";
+  private static int mcPort = 10000;
 
   public SoundClient() {
     this(defaultHost, defaultPort);
@@ -47,11 +52,37 @@ public class SoundClient {
     soundClient.requestAndSetId();
     soundClient.requestAndSetRole();
     soundClient.requestAndSetUdpPort();
-
     soundClient.setUpUdp();
-    soundClient.udpSendString("test123");
+    soundClient.udpSendString("test123"); // test multicast send
+    if (soundClient.getRole().contains("RECEIVER")) { // test multicast receive.
+      soundClient.setUpMulticast();
+      byte[] buf = new byte[100];
+      DatagramPacket mcPacket = new DatagramPacket(buf, buf.length);
+      try { 
+        soundClient.log("Listening for multicast");
+        soundClient.mcSocket.receive(mcPacket);
+        soundClient.log("yoda");
+        System.out.println(new String(buf));
+      } catch (IOException e) { 
+        e.printStackTrace();
+      }
+    }
 
   }
+
+  private void setUpMulticast() {
+    log("Setting up multicast.");
+    try {
+      mcSocket = new MulticastSocket(mcPort);
+      mcGroup = InetAddress.getByName(mcAddress);
+      mcSocket.joinGroup(mcGroup);
+    } catch (UnknownHostException e) {
+      e.printStackTrace();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+  }
+
 
   private void setUpUdp() { 
     try { 
@@ -173,8 +204,8 @@ public class SoundClient {
   }
 
 
-  private static void log(String msg) { 
-    logger(clientName, msg);
+  private void log(String msg) { 
+    logger(clientName + "-" + getId(), msg);
   }
 
 }
