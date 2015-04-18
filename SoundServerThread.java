@@ -58,82 +58,40 @@ public class SoundServerThread extends Thread {
   }
 
   public void run() { 
-    setUpTcpIo();
-    expectAndSend(ClientRequests.ID.toString(), tcpClientId.toString());
-    expectAndSend(ClientRequests.ROLE.toString(), clientRole.toString());
-    expectAndSend(ClientRequests.UDP_PORT.toString(), udpPort.toString());
+    tcpSetUpIo();
+    tcpExpectAndSend(ClientRequests.ID.toString(), tcpClientId.toString());
+    tcpExpectAndSend(ClientRequests.ROLE.toString(), clientRole.toString());
+    tcpExpectAndSend(ClientRequests.UDP_PORT.toString(), udpPort.toString());
 
     if (clientRole == ClientRoles.SENDER) { 
-      setUpUdpSocket();
-      expectAndSetArrayLength();
+      udpSetUpSocket();
+      tcpExpectAndSetArrayLength();
       udpReceiveAudioFromClient();
-      setUpMulticastSender();
+      mcSetUpBroadcaster();
       //mcTestSend();
+      mcBroadcastAudio();
     }
 
   }
 
-  private void setUdpTimeout(int ms) { 
-    try { 
-      udpSocket.setSoTimeout(ms);
-    } catch (SocketException e) { 
-      e.printStackTrace();
-    }
-  }
+  private void mcBroadcastAudio() {
+    // byte[] dummy = new byte[0];
+    DatagramPacket mcPacket; 
 
-  private void udpReceiveAudioFromClient() { 
-    DatagramPacket packet;
-    int arrLen = getArrayLength();
-    soundBytes = new byte[arrLen]; 
-    byte[] packetBytes = new byte[udpMaxPayload];
-    
+    log("Broadcasting audio to receiver clients.");
+
     int i = 0;
-  
-    setUdpTimeout(100);
 
-    log("Receiving byte " + i);
-
-    // get packets with constant payload size (udpMaxPayload) 
-    while (i < arrLen - udpMaxPayload) {
-        packet = new DatagramPacket(packetBytes, packetBytes.length);
-
-        try {
-          udpSocket.receive(packet);
-        } catch (SocketTimeoutException e) {
-          break; // This is the normal course of events.
-        } catch (IOException e) { 
-          e.printStackTrace(); 
-        }
-
-        System.arraycopy(packetBytes, 0, soundBytes, i, packetBytes.length);
-        i += udpMaxPayload;
-    }
-
-    //setUdpTimeout(5000); // todo: remove because for testing only, ie so we have time to start client in terminal.
-
-    // get final packet, size being what ever is left.
-    if (i < arrLen) { 
-      int finLen = arrLen - i;
-      byte[] finBytes = new byte[finLen];
-      packet = new DatagramPacket(finBytes, finLen);
-
+    while (i < soundBytes.length - udpMaxPayload) {
+      //log("i: " + i);
+      mcPacket = new DatagramPacket(soundBytes, i, udpMaxPayload, mcGroup, mcPort);
       try {
-        udpSocket.receive(packet);
-      } catch (SocketTimeoutException e) {
-        //break; // This is the normal course of events.
-      } catch (IOException e) { 
-        e.printStackTrace(); 
+        mcSocket.send(mcPacket);
+      } catch (IOException e) {
+        e.printStackTrace();
       }
-
-      System.arraycopy(finBytes, 0, soundBytes, i, finLen);
-      i += finLen;
+      i += udpMaxPayload;
     }
-
-
-    log("Received final byte: " + i);
-
-    setUdpTimeout(100); 
-
   }
 
   private void mcTestSend() { //  
@@ -154,6 +112,70 @@ public class SoundServerThread extends Thread {
     }
   }
 
+  private void udpSetTimeout(int ms) { 
+    try { 
+      udpSocket.setSoTimeout(ms);
+    } catch (SocketException e) { 
+      e.printStackTrace();
+    }
+  }
+
+  private void udpReceiveAudioFromClient() { 
+    DatagramPacket packet;
+    int arrLen = getArrayLength();
+    soundBytes = new byte[arrLen]; 
+    byte[] packetBytes = new byte[udpMaxPayload];
+    
+    int i = 0;
+  
+    udpSetTimeout(100);
+
+    log("Receiving byte " + i);
+
+    // get packets with constant payload size (udpMaxPayload) 
+    while (i < arrLen - udpMaxPayload) {
+        packet = new DatagramPacket(packetBytes, packetBytes.length);
+
+        try {
+          udpSocket.receive(packet);
+        } catch (SocketTimeoutException e) {
+          break; // This is the normal course of events.
+        } catch (IOException e) { 
+          e.printStackTrace(); 
+        }
+
+        System.arraycopy(packetBytes, 0, soundBytes, i, packetBytes.length);
+        i += udpMaxPayload;
+    }
+
+    //udpSetTimeout(5000); // todo: remove because for testing only, ie so we have time to start client in terminal.
+
+    // get final packet, size being what ever is left after getting contant length packets.
+    if (i < arrLen) { 
+      int finLen = arrLen - i;
+      byte[] finBytes = new byte[finLen];
+      packet = new DatagramPacket(finBytes, finLen);
+
+      try {
+        udpSocket.receive(packet);
+      } catch (SocketTimeoutException e) {
+        //break; // This is the normal course of events.
+      } catch (IOException e) { 
+        e.printStackTrace(); 
+      }
+
+      System.arraycopy(finBytes, 0, soundBytes, i, finLen);
+      i += finLen;
+    }
+
+
+    log("Received final byte: " + i);
+
+    udpSetTimeout(100); 
+
+  }
+
+
   private void udpReceiveString() { // max length of udpMaxPayload - just for testing at this point
 
     byte[] bytes = new byte[udpMaxPayload];
@@ -166,8 +188,8 @@ public class SoundServerThread extends Thread {
     log("Received string: " + new String(udpPacket.getData()));
   }
 
-  private void setUpMulticastSender() {
-    log("Setting up multicast sender.");
+  private void mcSetUpBroadcaster() {
+    log("Setting up multicast broadcaster.");
     try { 
       mcSocket = new MulticastSocket(); 
       mcGroup = InetAddress.getByName(mcAddress);
@@ -178,7 +200,7 @@ public class SoundServerThread extends Thread {
     }
   }
 
-  private void setUpTcpIo() {
+  private void tcpSetUpIo() {
     log("Setting up TCP IO stream with client.");
     try {
       isr = new InputStreamReader(tcpSocket.getInputStream());
@@ -189,8 +211,8 @@ public class SoundServerThread extends Thread {
     }
   }
 
-  private void expectAndSetArrayLength() { 
-    String request = expectAndSend(ClientRequests.ACK_LENGTH.toString(), Replies.ACK_LENGTH.toString()); // todo: check length ok before ack?
+  private void tcpExpectAndSetArrayLength() { 
+    String request = tcpExpectAndSend(ClientRequests.ACK_LENGTH.toString(), Replies.ACK_LENGTH.toString()); // todo: check length ok before ack?
     Pattern p = Pattern.compile("\\d+");
     Matcher m = p.matcher(request);
     m.find();
@@ -206,7 +228,7 @@ public class SoundServerThread extends Thread {
     return arrayLength; 
   }
 
-  private String expectAndSend(String expected, String sendThis) { 
+  private String tcpExpectAndSend(String expected, String sendThis) { 
     String request = null;
     log("Waiting for '" + expected + "' request from client.");
     request = tcpListen();
@@ -231,7 +253,7 @@ public class SoundServerThread extends Thread {
     return msg;
   }
 
-  private void setUpUdpSocket() {
+  private void udpSetUpSocket() {
     if (!udpIsUp) { 
       try {
         udpSocket = new DatagramSocket(udpPort);
