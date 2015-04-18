@@ -1,6 +1,7 @@
 import java.io.*;
 import java.nio.file.*;
 import java.net.*;
+import javax.sound.sampled.*;
 
 import static util.SoundUtil.*;
 
@@ -85,17 +86,49 @@ public class SoundClient {
 
     if (soundClient.getRole() == Role.SENDER) { 
       soundClient.readSoundFileIntoByteArray(audioFilename);
+      soundClient.playAudio(soundClient.getSoundBytesToSend()); // test play
       soundClient.tcpSendArrayLength();
       soundClient.udpSendSoundBytesToServerThread();
     }
 
     if (soundClient.getRole() == Role.RECEIVER) { 
-      soundClient.setUpMulticastReceiver();
+      soundClient.mcSetUpReceiver();
       //soundClient.mcReceiveString(udpMaxPayload); // test multicast receive.
       while(true) {
         soundClient.mcReceiveAudioBroadcast();
-        soundClient.playAudio();
+        soundClient.playAudio(soundClient.getSoundBytesToPlay());
       }
+    }
+  }
+
+  private byte[] getSoundBytesToSend() { 
+    return soundBytesToSend;
+  }
+
+  private byte[] getSoundBytesToPlay() { 
+    return soundBytesToPlay;
+  }
+
+  private void playAudio(byte[] bytes) {
+
+    int sampleRate = 44100;
+    int sampleSize = 16;
+    int channels = 2;
+    boolean signed = true;
+    boolean bigEndian = false;
+
+    AudioFormat format = new AudioFormat(sampleRate, sampleSize, channels, signed, bigEndian);
+
+    try {
+      DataLine.Info dataLineInfo = new DataLine.Info(SourceDataLine.class, format);
+      SourceDataLine sourceDataLine = (SourceDataLine) AudioSystem.getLine(dataLineInfo);
+      sourceDataLine.open(format);
+      sourceDataLine.start();
+      sourceDataLine.write(bytes, 0, bytes.length);
+      sourceDataLine.drain();
+      sourceDataLine.close();
+    } catch (Exception e) { // todo: make exceptions more specific
+      e.printStackTrace();
     }
   }
 
@@ -105,24 +138,22 @@ public class SoundClient {
     ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
     byte[] packetBytes = new byte[udpMaxPayload];
 
-    int byteNum = 0;
-
-    udpSetTimeout(100);
+    mcSetTimeout(100);
 
     while(true) { 
       packet = new DatagramPacket(packetBytes, packetBytes.length);
       try { 
         mcSocket.receive(packet);
       } catch (SocketTimeoutException e) {
+        log("TIMEOUT"); 
         break; // This is the normal course of events.
       } catch (IOException e) {
         e.printStackTrace();
       }
-
       byteStream.write(packetBytes, 0, packetBytes.length);
-      soundBytesToPlay = byteStream.toByteArray();
-      
     }
+    soundBytesToPlay = byteStream.toByteArray();
+    log("soundBytesToPlay.length: " + soundBytesToPlay.length); 
   }
 
   private void mcReceiveString(int len) { 
@@ -137,9 +168,9 @@ public class SoundClient {
     }
   }
 
-  private void udpSetTimeout(int ms) {
+  private void mcSetTimeout(int ms) {
     try {
-      udpSocket.setSoTimeout(ms);
+      mcSocket.setSoTimeout(ms);
     } catch (SocketException e) {
       e.printStackTrace();
     }
@@ -202,7 +233,7 @@ public class SoundClient {
 
 
 
-  private void setUpMulticastReceiver() {
+  private void mcSetUpReceiver() {
     log("Setting up multicast receiver.");
     try {
       mcSocket = new MulticastSocket(mcPort);

@@ -69,9 +69,15 @@ public class SoundServerThread extends Thread {
       udpReceiveAudioFromClient();
       mcSetUpBroadcaster();
       //mcTestSend();
-      while(true) mcBroadcastAudio();
+      while(true) { 
+        mcBroadcastAudio();
+        try { 
+          Thread.sleep(100);
+        } catch (InterruptedException e) { 
+          e.printStackTrace();
+        }
+      }
     }
-
   }
 
   private void mcBroadcastAudio() {
