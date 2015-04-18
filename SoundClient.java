@@ -49,7 +49,11 @@ public class SoundClient {
     ID,
     ROLE,
     UDP_PORT,
-    LENGTH
+    ACK_LENGTH
+  }
+
+  private enum Replies { 
+    ACK_LENGTH
   }
 
   byte[] soundBytes;
@@ -88,10 +92,10 @@ public class SoundClient {
   }
 
   private void tcpSendArrayLength() { 
-    String request = "LENGTH" + soundBytes.length;
+    String request = Replies.ACK_LENGTH.toString() + " " + soundBytes.length;
     String reply = tcpRequest(request);
 
-    if (reply != null && reply.startsWith(request))
+    if (reply != null && reply.startsWith(Replies.ACK_LENGTH.toString()))
       log("Server thread says it's ready to receive audio.");
     else { 
       log("Unexpected reply when sending array length.");

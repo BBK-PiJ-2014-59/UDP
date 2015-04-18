@@ -1,6 +1,7 @@
 import java.net.*;
 import java.io.*;
 import java.util.*;
+import java.util.regex.*;
 import static util.SoundUtil.*;
 
 public class SoundServerThread extends Thread { 
@@ -9,7 +10,7 @@ public class SoundServerThread extends Thread {
 
   private Socket tcpSocket;
   private Integer tcpClientId;
-  private ClientRole clientRole;
+  private ClientRoles clientRole;
   private boolean isFirstClient;
 
   private BufferedReader br;
@@ -20,15 +21,20 @@ public class SoundServerThread extends Thread {
   private Integer udpPort;
   private boolean udpIsUp;
 
-  private enum ClientRole { 
+  private enum ClientRoles { 
     SENDER,
     RECEIVER
   }
 
-  private enum Request { 
+  private enum ClientRequests { 
     ID,
     ROLE,
-    UDP_PORT
+    UDP_PORT,
+    ACK_LENGTH
+  }
+
+  private enum Replies { 
+    ACK_LENGTH
   }
 
   private MulticastSocket mcSocket; 
@@ -36,12 +42,15 @@ public class SoundServerThread extends Thread {
   private static String mcAddress = "224.111.111.111";
   private static int mcPort = 10000;
 
+  private static int udpMaxPayload = 512;
+  private int arrayLength; // todo: change variable name?
+
   SoundServerThread(Socket s, int id, int port, boolean isFirst) { 
     tcpSocket = s;
     tcpClientId = id; 
     udpPort = port;
     isFirstClient = isFirst;
-    clientRole = isFirstClient ? ClientRole.SENDER : ClientRole.RECEIVER;   
+    clientRole = isFirstClient ? ClientRoles.SENDER : ClientRoles.RECEIVER;   
     udpIsUp = false;
 
     log("Initialized to listen on UDP port " + udpPort);
@@ -49,49 +58,53 @@ public class SoundServerThread extends Thread {
 
   public void run() { 
     setUpTcpIo();
-    expectAndSend(Request.ID.toString(), tcpClientId.toString());
-    expectAndSend(Request.ROLE.toString(), clientRole.toString());
-    expectAndSend(Request.UDP_PORT.toString(), udpPort.toString());
-    setUpUdp();
+    expectAndSend(ClientRequests.ID.toString(), tcpClientId.toString());
+    expectAndSend(ClientRequests.ROLE.toString(), clientRole.toString());
+    expectAndSend(ClientRequests.UDP_PORT.toString(), udpPort.toString());
+    setUpUdpSocket();
+    expectAndSetArrayLength();
+     
 
-    // test UDP
+    //if (clientRole == ClientRoles.SENDER) { 
+      //setUpMulticastSender();
+      //mcTestSend();
+    //}
 
-    byte[] buffer = new byte[1000];
-    DatagramPacket udpPacket = new DatagramPacket(buffer, buffer.length); 
+  }
+
+
+  private void mcTestSend() { //  
+    byte[] dummy = new byte[0];
+    DatagramPacket mcPacket = new DatagramPacket(dummy, 0, mcGroup, mcPort);
+    int i = 0;
+    while(true) { 
+      ++i;
+      byte[] bytes = ("multicast test " + i).getBytes(); 
+      mcPacket.setData(bytes);
+      mcPacket.setLength(bytes.length);
+      try { 
+        mcSocket.send(mcPacket);
+        log(""+i);
+      } catch (IOException e) { 
+        e.printStackTrace();
+      }
+    }
+  }
+
+  private void udpReceiveString() { // max length of udpMaxPayload - just for testing at this point
+
+    byte[] bytes = new byte[udpMaxPayload];
+    DatagramPacket udpPacket = new DatagramPacket(bytes, bytes.length); 
     try { 
       udpSocket.receive(udpPacket);
     } catch (IOException e) { 
       e.printStackTrace();
     }
-    System.out.println(new String(udpPacket.getData()));
-
-    // Send/receive via multicast
-
-
-    // test multicast send
-
-    if (clientRole == ClientRole.SENDER) { 
-      setUpMulticast();
-      byte[] dummy = new byte[0];
-      DatagramPacket mcPacket = new DatagramPacket(dummy, 0, mcGroup, mcPort);
-      int i = 0;
-      while(true) { 
-        ++i;
-        byte[] bytes = ("multicast test " + i).getBytes(); 
-        mcPacket.setData(bytes);
-        mcPacket.setLength(bytes.length);
-        try { 
-          mcSocket.send(mcPacket);
-          log(""+i);
-        } catch (IOException e) { 
-          e.printStackTrace();
-        }
-      }
-    }
+    log("Received string: " + new String(udpPacket.getData()));
   }
 
-  private void setUpMulticast() {
-    log("Setting up multicast.");
+  private void setUpMulticastSender() {
+    log("Setting up multicast sender.");
     try { 
       mcSocket = new MulticastSocket(); 
       mcGroup = InetAddress.getByName(mcAddress);
@@ -113,7 +126,25 @@ public class SoundServerThread extends Thread {
     }
   }
 
-  private void expectAndSend(String expected, String sendThis) { 
+  private void expectAndSetArrayLength() { 
+    String request = expectAndSend(ClientRequests.ACK_LENGTH.toString(), Replies.ACK_LENGTH.toString()); // todo: check length ok before ack?
+    log("Received request: " + request);
+    Pattern p = Pattern.compile("\\d+");
+    Matcher m = p.matcher(request);
+    m.find();
+    setArrayLength(Integer.parseInt(m.group(0)));
+    log("Array length set to " + getArrayLength());
+  }
+
+  private void setArrayLength(int len) { 
+    arrayLength = len; 
+  }
+
+  private int getArrayLength() { 
+    return arrayLength; 
+  }
+
+  private String expectAndSend(String expected, String sendThis) { 
     String request = null;
     log("Waiting for '" + expected + "' request from client.");
     request = tcpListen();
@@ -121,10 +152,11 @@ public class SoundServerThread extends Thread {
     if (request.startsWith(expected)) {
       log("Message from client was as expected.");
       pw.println(sendThis);
-      log("Sent this " + expected + " to client: " + sendThis);
+      log("Sent this to client: " + sendThis);
     } else {
       log("Client sent this instead of '" + expected + "': " + request);
     }
+    return request; 
   }
 
   private String tcpListen() { 
@@ -137,7 +169,7 @@ public class SoundServerThread extends Thread {
     return msg;
   }
 
-  private void setUpUdp() {
+  private void setUpUdpSocket() {
     if (!udpIsUp) { 
       try {
         udpSocket = new DatagramSocket(udpPort);
