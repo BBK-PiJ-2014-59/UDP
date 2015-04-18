@@ -56,7 +56,8 @@ public class SoundClient {
     ACK_LENGTH
   }
 
-  byte[] soundBytes;
+  byte[] soundBytesToSend; // if sender
+  byte[] soundBytesToPlay; // if receiver
 
   public SoundClient() {
     this(defaultHost, defaultPort);
@@ -79,20 +80,73 @@ public class SoundClient {
     soundClient.requestAndSetRole();
     soundClient.requestAndSetUdpPort();
     soundClient.setUpUdp();
+
     //soundClient.udpSendString("UDP test123"); // test multicast send
-    if (soundClient.getRole() == Role.RECEIVER) { 
-      soundClient.setUpMulticastReceiver();
-      //soundClient.mcReceiveString(udpMaxPayload); // test multicast receive.
-    }
+
     if (soundClient.getRole() == Role.SENDER) { 
       soundClient.readSoundFileIntoByteArray(audioFilename);
       soundClient.tcpSendArrayLength();
       soundClient.udpSendSoundBytesToServerThread();
     }
+
+    if (soundClient.getRole() == Role.RECEIVER) { 
+      soundClient.setUpMulticastReceiver();
+      //soundClient.mcReceiveString(udpMaxPayload); // test multicast receive.
+      while(true) {
+        soundClient.mcReceiveAudioBroadcast();
+        soundClient.playAudio();
+      }
+    }
+  }
+
+  private void mcReceiveAudioBroadcast() { 
+    log("Listening for multicast audio broadcast.");
+    DatagramPacket packet;  
+    ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
+    byte[] packetBytes = new byte[udpMaxPayload];
+
+    int byteNum = 0;
+
+    udpSetTimeout(100);
+
+    while(true) { 
+      packet = new DatagramPacket(packetBytes, packetBytes.length);
+      try { 
+        mcSocket.receive(packet);
+      } catch (SocketTimeoutException e) {
+        break; // This is the normal course of events.
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+
+      byteStream.write(packetBytes, 0, packetBytes.length);
+      soundBytesToPlay = byteStream.toByteArray();
+      
+    }
+  }
+
+  private void mcReceiveString(int len) { 
+    byte[] buf = new byte[len];
+    DatagramPacket mcPacket = new DatagramPacket(buf, buf.length);
+    try { 
+      log("Listening for multicast");
+      mcSocket.receive(mcPacket);
+      log("Received: " + new String(buf));
+    } catch (IOException e) { 
+      e.printStackTrace();
+    }
+  }
+
+  private void udpSetTimeout(int ms) {
+    try {
+      udpSocket.setSoTimeout(ms);
+    } catch (SocketException e) {
+      e.printStackTrace();
+    }
   }
 
   private void tcpSendArrayLength() { 
-    String request = Replies.ACK_LENGTH.toString() + " " + soundBytes.length;
+    String request = Replies.ACK_LENGTH.toString() + " " + soundBytesToSend.length;
     String reply = tcpRequest(request);
 
     if (reply != null && reply.startsWith(Replies.ACK_LENGTH.toString()))
@@ -108,7 +162,7 @@ public class SoundClient {
 
     try { 
       log("Reading file " + filename + " into byte array.");
-      soundBytes = Files.readAllBytes(path);
+      soundBytesToSend = Files.readAllBytes(path);
     } catch (IOException e) { 
       e.printStackTrace();
     }
@@ -121,9 +175,9 @@ public class SoundClient {
     int i = 0;
     
     log("Sending sound to server thread.");
-    while (i < soundBytes.length - udpMaxPayload) { 
-      log("i: " + i);
-      packet = new DatagramPacket(soundBytes, i, udpMaxPayload, udpHost, udpPort);
+    while (i < soundBytesToSend.length - udpMaxPayload) { 
+      //log("i: " + i);
+      packet = new DatagramPacket(soundBytesToSend, i, udpMaxPayload, udpHost, udpPort);
       try { 
         udpSocket.send(packet);
       } catch (IOException e) { 
@@ -146,17 +200,6 @@ public class SoundClient {
     }
   }
 
-  private void mcReceiveString(int len) { 
-    byte[] buf = new byte[len];
-    DatagramPacket mcPacket = new DatagramPacket(buf, buf.length);
-    try { 
-      log("Listening for multicast");
-      mcSocket.receive(mcPacket);
-      log("Received: " + new String(buf));
-    } catch (IOException e) { 
-      e.printStackTrace();
-    }
-  }
 
 
   private void setUpMulticastReceiver() {

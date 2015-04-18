@@ -69,7 +69,7 @@ public class SoundServerThread extends Thread {
       udpReceiveAudioFromClient();
       mcSetUpBroadcaster();
       //mcTestSend();
-      mcBroadcastAudio();
+      while(true) mcBroadcastAudio();
     }
 
   }
