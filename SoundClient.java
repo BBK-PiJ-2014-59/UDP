@@ -10,13 +10,15 @@ public class SoundClient {
   private String host;
   private int port;
 
+
   private static String defaultHost = "localhost";
   private static int defaultPort = 789;
 
   private int id; // todo: make same as thread.getId();
   private static int defaultId = 0;
 
-  private String role; // todo: use enum/check for valid role reply from server.
+  //private String role; // todo: use enum/check for valid role reply from server.
+  //private String role; // todo: use enum/check for valid role reply from server.
 
   private BufferedReader br;
   private PrintWriter pw;
@@ -32,6 +34,22 @@ public class SoundClient {
   private static String mcAddress = "224.111.111.111";
   private static int mcPort = 10000;
 
+  private static final int maxUdpPayload = 512; // Seems best practice not to exceeed this.
+  
+  private enum Role {
+    NOT_SET,
+    SENDER,
+    RECEIVER
+  }
+
+  private Role role;
+
+  private enum Request {
+    ID,
+    ROLE,
+    UDP_PORT
+  }
+
   public SoundClient() {
     this(defaultHost, defaultPort);
   }
@@ -40,7 +58,7 @@ public class SoundClient {
     this.host = host;
     this.port = port;
     id = defaultId;
-    role = null;
+    role = Role.NOT_SET;
   }
 
   public static void main(String[] args) { 
@@ -53,21 +71,36 @@ public class SoundClient {
     soundClient.requestAndSetRole();
     soundClient.requestAndSetUdpPort();
     soundClient.setUpUdp();
-    soundClient.udpSendString("test123"); // test multicast send
-    if (soundClient.getRole().contains("RECEIVER")) { // test multicast receive.
+    soundClient.udpSendString("UDP test123"); // test multicast send
+    if (soundClient.getRole().equals(Role.RECEIVER)) { // test multicast receive.
       soundClient.setUpMulticast();
-      byte[] buf = new byte[100];
-      DatagramPacket mcPacket = new DatagramPacket(buf, buf.length);
-      try { 
-        soundClient.log("Listening for multicast");
-        soundClient.mcSocket.receive(mcPacket);
-        System.out.println(new String(buf));
-      } catch (IOException e) { 
-        e.printStackTrace();
-      }
+      soundClient.mcReceiveString(maxUdpPayload);
     }
+  }
 
+  private void mcReceiveString(int len) { 
+    byte[] buf = new byte[len];
+    DatagramPacket mcPacket = new DatagramPacket(buf, buf.length);
+    try { 
+      log("Listening for multicast");
+      mcSocket.receive(mcPacket);
+      log("Received: " + new String(buf));
+    } catch (IOException e) { 
+      e.printStackTrace();
+    }
+  }
 
+  private void udpSendString(String msg) { 
+    log("Sending string via UDP: " + msg );
+    byte[] bytes = msg.getBytes();
+    DatagramPacket packet = new DatagramPacket(bytes, bytes.length, udpHost, udpPort);
+    if (packet == null)
+      log("packet null"); 
+    try { 
+      udpSock.send(packet);
+    } catch (IOException e) { 
+      e.printStackTrace();
+    }
   }
 
   private void setUpMulticast() {
@@ -97,18 +130,6 @@ public class SoundClient {
     }
   }
 
-  private void udpSendString(String msg) { 
-    log("Sending string via UDP: " + msg );
-    byte[] bytes = msg.getBytes();
-    DatagramPacket packet = new DatagramPacket(bytes, bytes.length, udpHost, udpPort);
-    if (packet == null)
-      log("packet null"); 
-    try { 
-      udpSock.send(packet);
-    } catch (IOException e) { 
-      e.printStackTrace();
-    }
-  }
 
 
   private void connectTcp() { 
@@ -146,7 +167,7 @@ public class SoundClient {
     return id;
   }
 
-  private String getRole() { 
+  private Role getRole() { 
     return role;
   }
 
@@ -179,12 +200,19 @@ public class SoundClient {
   private void requestAndSetRole() {  // todo: DRY
     String request = "ROLE";
     String reply = tcpRequest(request);
-    if (reply != null) { 
-      role = reply; 
-      log(request + " received: " + getRole());
-    } else { 
+
+    if (reply.contains("RECEIVER")) 
+      role = Role.RECEIVER;
+    if (reply.contains("SENDER"))
+      role = Role.SENDER;
+    log("Role set to " + getRole()); 
+
+    if (reply == null) 
       log("Got null reply from server when requesting " + request);
-    }
+    else
+      log("Unexpected reply from server when requesting " + request + ": " + reply);
+
+    // todo: add exceptions (everywhere) for bad/no replies.
   }
 
   private String tcpRequest(String request) { 
