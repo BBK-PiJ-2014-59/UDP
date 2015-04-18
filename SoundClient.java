@@ -35,7 +35,7 @@ public class SoundClient {
   private static String mcAddress = "224.111.111.111";
   private static int mcPort = 10000;
 
-  private static final int maxUdpPayload = 512; // Seems best practice not to exceeed this.
+  private static final int udpMaxPayload = 512; // Seems best practice not to exceeed this.
   
   private enum Role {
     NOT_SET,
@@ -82,7 +82,7 @@ public class SoundClient {
     //soundClient.udpSendString("UDP test123"); // test multicast send
     if (soundClient.getRole() == Role.RECEIVER) { 
       soundClient.setUpMulticastReceiver();
-      //soundClient.mcReceiveString(maxUdpPayload); // test multicast receive.
+      //soundClient.mcReceiveString(udpMaxPayload); // test multicast receive.
     }
     if (soundClient.getRole() == Role.SENDER) { 
       soundClient.readSoundFileIntoByteArray(audioFilename);
@@ -96,10 +96,10 @@ public class SoundClient {
     String reply = tcpRequest(request);
 
     if (reply != null && reply.startsWith(Replies.ACK_LENGTH.toString()))
-      log("Server thread says it's ready to receive audio.");
+      log("Server thread says it's ready to receive audio of requested length.");
     else { 
       log("Unexpected reply when sending array length.");
-      // todo: handle problem.
+      // todo: handle problem (need to do this everwhere if there's time)
     }
   }
 
@@ -121,14 +121,15 @@ public class SoundClient {
     int i = 0;
     
     log("Sending sound to server thread.");
-    while (i < soundBytes.length) { 
-      packet = new DatagramPacket(soundBytes, i, maxUdpPayload, udpHost, udpPort);
+    while (i < soundBytes.length - udpMaxPayload) { 
+      log("i: " + i);
+      packet = new DatagramPacket(soundBytes, i, udpMaxPayload, udpHost, udpPort);
       try { 
         udpSocket.send(packet);
       } catch (IOException e) { 
         e.printStackTrace();
       }
-      i += maxUdpPayload;
+      i += udpMaxPayload;
     }
   }
 
