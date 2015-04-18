@@ -1,15 +1,16 @@
 import java.io.*;
+import java.nio.file.*;
 import java.net.*;
 
 import static util.SoundUtil.*;
 
 public class SoundClient { 
 
-  private static String clientName = "SoundClient";
+  private static String loggingName = "SoundClient";
 
-  private String host;
-  private int port;
-
+  private static String audioFilename = "Roland-JX-8P-Bell-C5.wav";
+  private String tcpHost;
+  private int tcpPort;
 
   private static String defaultHost = "localhost";
   private static int defaultPort = 789;
@@ -25,7 +26,7 @@ public class SoundClient {
   private Socket sock;
   private InputStreamReader isr;
 
-  private DatagramSocket udpSock;
+  private DatagramSocket udpSocket;
   private InetAddress udpHost;
   private int udpPort;
 
@@ -47,16 +48,19 @@ public class SoundClient {
   private enum Request {
     ID,
     ROLE,
-    UDP_PORT
+    UDP_PORT,
+    LENGTH
   }
+
+  byte[] soundBytes;
 
   public SoundClient() {
     this(defaultHost, defaultPort);
   }
 
   public SoundClient(String host, int port) {
-    this.host = host;
-    this.port = port;
+    tcpHost = host;
+    tcpPort = port;
     id = defaultId;
     role = Role.NOT_SET;
   }
@@ -71,10 +75,69 @@ public class SoundClient {
     soundClient.requestAndSetRole();
     soundClient.requestAndSetUdpPort();
     soundClient.setUpUdp();
-    soundClient.udpSendString("UDP test123"); // test multicast send
-    if (soundClient.getRole().equals(Role.RECEIVER)) { // test multicast receive.
-      soundClient.setUpMulticast();
-      soundClient.mcReceiveString(maxUdpPayload);
+    //soundClient.udpSendString("UDP test123"); // test multicast send
+    if (soundClient.getRole() == Role.RECEIVER) { 
+      soundClient.setUpMulticastReceiver();
+      //soundClient.mcReceiveString(maxUdpPayload); // test multicast receive.
+    }
+    if (soundClient.getRole() == Role.SENDER) { 
+      soundClient.readSoundFileIntoByteArray(audioFilename);
+      soundClient.tcpSendArrayLength();
+      soundClient.udpSendSoundBytesToServerThread();
+    }
+  }
+
+  private void tcpSendArrayLength() { 
+    String request = "LENGTH" + soundBytes.length;
+    String reply = tcpRequest(request);
+
+    if (reply != null && reply.startsWith(request))
+      log("Server thread says it's ready to receive audio.");
+    else { 
+      log("Unexpected reply when sending array length.");
+      // todo: handle problem.
+    }
+  }
+
+  private void readSoundFileIntoByteArray(String filename) { 
+    Path path = Paths.get(filename);
+
+    try { 
+      log("Reading file " + filename + " into byte array.");
+      soundBytes = Files.readAllBytes(path);
+    } catch (IOException e) { 
+      e.printStackTrace();
+    }
+  }
+
+  private void udpSendSoundBytesToServerThread() { 
+
+    DatagramPacket packet;
+
+    int i = 0;
+    
+    log("Sending sound to server thread.");
+    while (i < soundBytes.length) { 
+      packet = new DatagramPacket(soundBytes, i, maxUdpPayload, udpHost, udpPort);
+      try { 
+        udpSocket.send(packet);
+      } catch (IOException e) { 
+        e.printStackTrace();
+      }
+      i += maxUdpPayload;
+    }
+  }
+
+  private void udpSendString(String msg) { 
+    log("Sending string via UDP: " + msg);
+    byte[] bytes = msg.getBytes();
+    DatagramPacket packet = new DatagramPacket(bytes, bytes.length, udpHost, udpPort);
+    if (packet == null)
+      log("packet null"); 
+    try { 
+      udpSocket.send(packet);
+    } catch (IOException e) { 
+      e.printStackTrace();
     }
   }
 
@@ -90,21 +153,9 @@ public class SoundClient {
     }
   }
 
-  private void udpSendString(String msg) { 
-    log("Sending string via UDP: " + msg );
-    byte[] bytes = msg.getBytes();
-    DatagramPacket packet = new DatagramPacket(bytes, bytes.length, udpHost, udpPort);
-    if (packet == null)
-      log("packet null"); 
-    try { 
-      udpSock.send(packet);
-    } catch (IOException e) { 
-      e.printStackTrace();
-    }
-  }
 
-  private void setUpMulticast() {
-    log("Setting up multicast.");
+  private void setUpMulticastReceiver() {
+    log("Setting up multicast receiver.");
     try {
       mcSocket = new MulticastSocket(mcPort);
       mcGroup = InetAddress.getByName(mcAddress);
@@ -119,7 +170,7 @@ public class SoundClient {
 
   private void setUpUdp() { 
     try { 
-      udpSock = new DatagramSocket();
+      udpSocket = new DatagramSocket();
     } catch (IOException e) { 
       e.printStackTrace();
     }
@@ -138,7 +189,7 @@ public class SoundClient {
 
     log("Setting up TCP connection with server.");
     try { 
-      sock = new Socket(host, port);
+      sock = new Socket(tcpHost, tcpPort);
     } catch (ConnectException e) { // Connection refused
       e.printStackTrace();
     } catch (UnknownHostException e) { // couldn't resolve name. 
@@ -233,7 +284,7 @@ public class SoundClient {
 
 
   private void log(String msg) { 
-    logger(clientName + "-" + getId(), msg);
+    logger(loggingName + "-" + getId(), msg);
   }
 
 }
