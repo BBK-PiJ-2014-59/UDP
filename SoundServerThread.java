@@ -46,6 +46,8 @@ public class SoundServerThread extends Thread {
   private byte[] soundBytes;
   private int arrayLength; // todo: change variable name?
 
+  private boolean timedOut;
+
   SoundServerThread(Socket s, int id, int port, boolean isFirst) { 
     tcpSocket = s;
     tcpClientId = id; 
@@ -53,6 +55,7 @@ public class SoundServerThread extends Thread {
     isFirstClient = isFirst;
     clientRole = isFirstClient ? ClientRoles.SENDER : ClientRoles.RECEIVER;   
     udpIsUp = false;
+    timedOut = false;
 
     log("Initialized to listen on UDP port " + udpPort);
   }
@@ -64,12 +67,14 @@ public class SoundServerThread extends Thread {
     tcpExpectAndSend(ClientRequests.UDP_PORT.toString(), udpPort.toString());
 
     if (clientRole == ClientRoles.SENDER) { 
+
       udpSetUpSocket();
       tcpExpectAndSetArrayLength();
-      udpReceiveAudioFromClient();
       mcSetUpBroadcaster();
-      //mcTestSend();
-      while(true) { 
+
+      while(!timedOut) { 
+
+        udpReceiveAudioFromClient();
         mcBroadcastAudio();
         try { 
           Thread.sleep(1100);
@@ -89,7 +94,7 @@ public class SoundServerThread extends Thread {
     int i = 0;
 
     while (i < soundBytes.length - udpMaxPayload) {
-      log("i: " + i);
+      //log("i: " + i);
       mcPacket = new DatagramPacket(soundBytes, i, udpMaxPayload, mcGroup, mcPort);
       try {
         mcSocket.send(mcPacket);

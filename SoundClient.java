@@ -88,7 +88,9 @@ public class SoundClient {
       soundClient.readSoundFileIntoByteArray(audioFilename);
       //soundClient.playAudio(soundClient.getSoundBytesToSend()); // test play
       soundClient.tcpSendArrayLength();
-      soundClient.udpSendSoundBytesToServerThread();
+      while(true) { 
+        soundClient.udpSendSoundBytesToServerThread();
+      }
     }
 
     if (soundClient.getRole() == Role.RECEIVER) { 
@@ -212,7 +214,7 @@ public class SoundClient {
 
     int i = 0;
     
-    log("Sending sound to server thread.");
+    //log("Sending sound to server thread.");
     while (i < soundBytesToSend.length - udpMaxPayload) { 
       //log("i: " + i);
       packet = new DatagramPacket(soundBytesToSend, i, udpMaxPayload, udpHost, udpPort);
