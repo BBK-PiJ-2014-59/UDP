@@ -86,7 +86,7 @@ public class SoundClient {
 
     if (soundClient.getRole() == Role.SENDER) { 
       soundClient.readSoundFileIntoByteArray(audioFilename);
-      soundClient.playAudio(soundClient.getSoundBytesToSend()); // test play
+      //soundClient.playAudio(soundClient.getSoundBytesToSend()); // test play
       soundClient.tcpSendArrayLength();
       soundClient.udpSendSoundBytesToServerThread();
     }
@@ -95,8 +95,8 @@ public class SoundClient {
       soundClient.mcSetUpReceiver();
       //soundClient.mcReceiveString(udpMaxPayload); // test multicast receive.
       while(true) {
-        soundClient.mcReceiveAudioBroadcast();
-        soundClient.playAudio(soundClient.getSoundBytesToPlay());
+        byte[] playBytes = soundClient.mcReceiveAudioBroadcast();
+        soundClient.playAudio(playBytes);
       }
     }
   }
@@ -132,14 +132,17 @@ public class SoundClient {
     }
   }
 
-  private void mcReceiveAudioBroadcast() { 
+  //private void mcReceiveAudioBroadcast() { 
+  private byte[] mcReceiveAudioBroadcast() { 
     log("Listening for multicast audio broadcast.");
     DatagramPacket packet;  
     ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
+    //byte[] result = new byte[1000000];
     byte[] packetBytes = new byte[udpMaxPayload];
 
-    mcSetTimeout(100);
+    mcSetTimeout(1000);
 
+    int i = 0;
     while(true) { 
       packet = new DatagramPacket(packetBytes, packetBytes.length);
       try { 
@@ -151,9 +154,12 @@ public class SoundClient {
         e.printStackTrace();
       }
       byteStream.write(packetBytes, 0, packetBytes.length);
+      //System.arraycopy(packetBytes, 0, result, i, packetBytes.length); 
+      i += udpMaxPayload;
     }
-    soundBytesToPlay = byteStream.toByteArray();
-    log("soundBytesToPlay.length: " + soundBytesToPlay.length); 
+    byte[] result = byteStream.toByteArray();
+    log("Bytes to play: " + result.length); 
+    return result;
   }
 
   private void mcReceiveString(int len) { 

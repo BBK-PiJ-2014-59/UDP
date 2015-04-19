@@ -72,7 +72,7 @@ public class SoundServerThread extends Thread {
       while(true) { 
         mcBroadcastAudio();
         try { 
-          Thread.sleep(100);
+          Thread.sleep(1100);
         } catch (InterruptedException e) { 
           e.printStackTrace();
         }
@@ -89,7 +89,7 @@ public class SoundServerThread extends Thread {
     int i = 0;
 
     while (i < soundBytes.length - udpMaxPayload) {
-      //log("i: " + i);
+      log("i: " + i);
       mcPacket = new DatagramPacket(soundBytes, i, udpMaxPayload, mcGroup, mcPort);
       try {
         mcSocket.send(mcPacket);
