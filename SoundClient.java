@@ -158,6 +158,7 @@ public class SoundClient {
       i += udpMaxPayload;
     }
     byte[] result = byteStream.toByteArray();
+
     log("Bytes to play: " + result.length); 
     return result;
   }
