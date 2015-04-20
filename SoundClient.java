@@ -3,6 +3,7 @@ import java.nio.file.*;
 import java.net.*;
 import javax.sound.sampled.*;
 import org.apache.commons.collections4.queue.CircularFifoQueue;
+import java.util.*;
 
 import static util.SoundUtil.*;
 
@@ -93,11 +94,26 @@ public class SoundClient {
 
     if (soundClient.getRole() == Role.RECEIVER) { 
       soundClient.mcSetUpReceiver();
+      int bufSize = 58192;
+      Queue circBuf = new CircularFifoQueue(bufSize);
+      byte[] soundBytes; 
+
+      // todo start PlayerThread here which takes circBuf.
+
+      new SoundClientPlayerThread(circBuf).start();
+
+      while(true) { 
+          soundBytes = soundClient.mcReceiveAudioPacket();
+          for (int i=0; i<udpMaxPayload; ++i) { 
+            circBuf.add(soundBytes[i]);
+          }
+      }
+
+      /*
       int bufPackets = 1024;
       int bufSize = bufPackets * udpMaxPayload;
       byte[] buf = new byte[bufSize];
       byte[] buf2 = new byte[bufSize];
-
       while(true) {
         for (int i=0; i<bufSize; i+=udpMaxPayload) { 
           byte[] soundBytes = soundClient.mcReceiveAudioPacket();
@@ -109,6 +125,7 @@ public class SoundClient {
         soundClient.playAudio(buf2);
         //soundClient.playAudio(buf);
       }
+      */
     }
   }
 
@@ -127,6 +144,23 @@ public class SoundClient {
 
     return packetBytes;
   }
+/*
+  private byte[] mcReceiveAudioPacket() { 
+
+    byte[] packetBytes = new byte[udpMaxPayload];
+    DatagramPacket packet = new DatagramPacket(packetBytes, packetBytes.length);
+
+    try { 
+      mcSocket.receive(packet);
+    } catch (SocketTimeoutException e) {
+      log("Timeout receiving multicast packet."); 
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+
+    return packetBytes;
+  }
+*/
 
   private byte[] getSoundBytesToSend() { 
     return soundBytesToSend;
