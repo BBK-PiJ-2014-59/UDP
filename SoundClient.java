@@ -94,7 +94,7 @@ public class SoundClient {
 
     if (soundClient.getRole() == Role.RECEIVER) { 
       soundClient.mcSetUpReceiver();
-      int bufSize = 58192;
+      int bufSize = 4096;
       Queue circBuf = new CircularFifoQueue(bufSize);
       byte[] soundBytes; 
 

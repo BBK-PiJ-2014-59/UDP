@@ -13,10 +13,10 @@ public class SoundClientPlayerThread extends Thread {
   }
 
   public void run() { 
-    int bufSize = 58192;
+    int bufSize = 4096;
     byte[] soundBytes = new byte[bufSize];
     try { 
-      Thread.sleep(1000);
+      Thread.sleep(2000);
     } catch (InterruptedException e) { 
       e.printStackTrace();
     }
