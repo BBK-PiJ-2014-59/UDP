@@ -46,8 +46,6 @@ public class SoundServerThread extends Thread {
   private byte[] soundBytes;
   private int arrayLength; // todo: change variable name?
 
-  private boolean udpSenderTimedOut;
-
   SoundServerThread(Socket s, int id, int port, boolean isFirst) { 
     tcpSocket = s;
     tcpClientId = id; 
@@ -55,7 +53,6 @@ public class SoundServerThread extends Thread {
     isFirstClient = isFirst;
     clientRole = isFirstClient ? ClientRoles.SENDER : ClientRoles.RECEIVER;   
     udpIsUp = false;
-    udpSenderTimedOut = false;
 
     log("Initialized to listen on UDP port " + udpPort);
   }
@@ -67,46 +64,66 @@ public class SoundServerThread extends Thread {
     tcpExpectAndSend(ClientRequests.UDP_PORT.toString(), udpPort.toString());
 
     if (clientRole == ClientRoles.SENDER) { 
-
       udpSetUpSocket();
-      mcSetUpSend();
-      udpSetTimeout(5000); 
-
-      log("Starting relay loop.");
-      while(!udpSenderTimedOut) { 
-        byte[] bytes = udpReceiveAudioPacketFromClient();
-        mcSendAudioPacket(bytes);
+      tcpExpectAndSetArrayLength();
+      udpReceiveAudioFromClient();
+      mcSetUpBroadcaster();
+      //mcTestSend();
+      while(true) { 
+        mcBroadcastAudio();
+        try { 
+          Thread.sleep(1100);
+        } catch (InterruptedException e) { 
+          e.printStackTrace();
+        }
       }
     }
   }
 
-  private void mcSendAudioPacket(byte[] bytes) {
+  private void mcBroadcastAudio() {
+    // byte[] dummy = new byte[0];
+    DatagramPacket mcPacket; 
 
-    DatagramPacket mcPacket = new DatagramPacket(bytes, 0, udpMaxPayload, mcGroup, mcPort);
+    log("Broadcasting audio to receiver clients.");
 
-    try {
-      mcSocket.send(mcPacket);
-    } catch (IOException e) {
-      e.printStackTrace();
+    int i = 0;
+
+    while (i < soundBytes.length - udpMaxPayload) {
+      log("i: " + i);
+      mcPacket = new DatagramPacket(soundBytes, i, udpMaxPayload, mcGroup, mcPort);
+      try {
+        mcSocket.send(mcPacket);
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+      i += udpMaxPayload;
     }
   }
 
-  private byte[] udpReceiveAudioPacketFromClient() { 
-
-    DatagramPacket packet;
-    byte[] packetBytes = new byte[udpMaxPayload];
-    packet = new DatagramPacket(packetBytes, packetBytes.length);
-
-    try {
-      udpSocket.receive(packet);
-    } catch (SocketTimeoutException e) {
-      udpSenderTimedOut = true; 
-    } catch (IOException e) { 
-      e.printStackTrace(); 
+  private void mcTestSend() { //  
+    byte[] dummy = new byte[0];
+    DatagramPacket mcPacket = new DatagramPacket(dummy, 0, mcGroup, mcPort);
+    int i = 0;
+    while(true) { 
+      ++i;
+      byte[] bytes = ("multicast test " + i).getBytes(); 
+      mcPacket.setData(bytes);
+      mcPacket.setLength(bytes.length);
+      try { 
+        mcSocket.send(mcPacket);
+        log(""+i);
+      } catch (IOException e) { 
+        e.printStackTrace();
+      }
     }
+  }
 
-    return packetBytes;
-
+  private void udpSetTimeout(int ms) { 
+    try { 
+      udpSocket.setSoTimeout(ms);
+    } catch (SocketException e) { 
+      e.printStackTrace();
+    }
   }
 
   private void udpReceiveAudioFromClient() { 
@@ -164,53 +181,6 @@ public class SoundServerThread extends Thread {
 
   }
 
-  private void mcBroadcastAudio() {
-    // byte[] dummy = new byte[0];
-    DatagramPacket mcPacket; 
-
-    log("Broadcasting audio to receiver clients.");
-
-    int i = 0;
-
-    while (i < soundBytes.length - udpMaxPayload) {
-      //log("i: " + i);
-      mcPacket = new DatagramPacket(soundBytes, i, udpMaxPayload, mcGroup, mcPort);
-      try {
-        mcSocket.send(mcPacket);
-      } catch (IOException e) {
-        e.printStackTrace();
-      }
-      i += udpMaxPayload;
-    }
-  }
-
-  private void mcTestSend() { //  
-    byte[] dummy = new byte[0];
-    DatagramPacket mcPacket = new DatagramPacket(dummy, 0, mcGroup, mcPort);
-    int i = 0;
-    while(true) { 
-      ++i;
-      byte[] bytes = ("multicast test " + i).getBytes(); 
-      mcPacket.setData(bytes);
-      mcPacket.setLength(bytes.length);
-      try { 
-        mcSocket.send(mcPacket);
-        log(""+i);
-      } catch (IOException e) { 
-        e.printStackTrace();
-      }
-    }
-  }
-
-  private void udpSetTimeout(int ms) { 
-    try { 
-      udpSocket.setSoTimeout(ms);
-    } catch (SocketException e) { 
-      e.printStackTrace();
-    }
-  }
-
-
 
   private void udpReceiveString() { // max length of udpMaxPayload - just for testing at this point
 
@@ -224,8 +194,8 @@ public class SoundServerThread extends Thread {
     log("Received string: " + new String(udpPacket.getData()));
   }
 
-  private void mcSetUpSend() {
-    log("Setting up multicast send.");
+  private void mcSetUpBroadcaster() {
+    log("Setting up multicast broadcaster.");
     try { 
       mcSocket = new MulticastSocket(); 
       mcGroup = InetAddress.getByName(mcAddress);
@@ -306,28 +276,4 @@ public class SoundServerThread extends Thread {
     logger(programName + "-" + getId(), msg);
   }
 
-  private void oldRun() { 
-    tcpSetUpIo();
-    tcpExpectAndSend(ClientRequests.ID.toString(), tcpClientId.toString());
-    tcpExpectAndSend(ClientRequests.ROLE.toString(), clientRole.toString());
-    tcpExpectAndSend(ClientRequests.UDP_PORT.toString(), udpPort.toString());
-
-    if (clientRole == ClientRoles.SENDER) { 
-
-      udpSetUpSocket();
-      tcpExpectAndSetArrayLength();
-      mcSetUpSend();
-
-      while(!udpSenderTimedOut) { 
-
-        udpReceiveAudioFromClient();
-        mcBroadcastAudio();
-        try { 
-          Thread.sleep(1100);
-        } catch (InterruptedException e) { 
-          e.printStackTrace();
-        }
-      }
-    }
-  }
 }

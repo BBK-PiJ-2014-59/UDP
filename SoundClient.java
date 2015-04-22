@@ -2,8 +2,6 @@ import java.io.*;
 import java.nio.file.*;
 import java.net.*;
 import javax.sound.sampled.*;
-import org.apache.commons.collections4.queue.CircularFifoQueue;
-import java.util.*;
 
 import static util.SoundUtil.*;
 
@@ -84,83 +82,24 @@ public class SoundClient {
     soundClient.requestAndSetUdpPort();
     soundClient.setUpUdp();
 
+    //soundClient.udpSendString("UDP test123"); // test multicast send
+
     if (soundClient.getRole() == Role.SENDER) { 
       soundClient.readSoundFileIntoByteArray(audioFilename);
-      soundClient.log("Sending sound to server thread in a loop.");
-      while(true) { 
-        soundClient.udpSendSoundBytesToServerThread();
-      }
+      //soundClient.playAudio(soundClient.getSoundBytesToSend()); // test play
+      soundClient.tcpSendArrayLength();
+      soundClient.udpSendSoundBytesToServerThread();
     }
 
     if (soundClient.getRole() == Role.RECEIVER) { 
       soundClient.mcSetUpReceiver();
-      int bufSize = 4096;
-      Queue circBuf = new CircularFifoQueue(bufSize);
-      byte[] soundBytes; 
-
-      // todo start PlayerThread here which takes circBuf.
-
-      new SoundClientPlayerThread(circBuf).start();
-
-      while(true) { 
-          soundBytes = soundClient.mcReceiveAudioPacket();
-          for (int i=0; i<udpMaxPayload; ++i) { 
-            circBuf.add(soundBytes[i]);
-          }
-      }
-
-      /*
-      int bufPackets = 1024;
-      int bufSize = bufPackets * udpMaxPayload;
-      byte[] buf = new byte[bufSize];
-      byte[] buf2 = new byte[bufSize];
+      //soundClient.mcReceiveString(udpMaxPayload); // test multicast receive.
       while(true) {
-        for (int i=0; i<bufSize; i+=udpMaxPayload) { 
-          byte[] soundBytes = soundClient.mcReceiveAudioPacket();
-          System.arraycopy(soundBytes, 0, buf, i, soundBytes.length);
-          //for (int j=i; j<soundBytes.length; j++)
-           // buf[j] = soundBytes[j-i];
-        }
-        System.arraycopy(buf, 0, buf2, 0, buf.length);
-        soundClient.playAudio(buf2);
-        //soundClient.playAudio(buf);
+        byte[] playBytes = soundClient.mcReceiveAudioBroadcast();
+        soundClient.playAudio(playBytes);
       }
-      */
     }
   }
-
-  private byte[] mcReceiveAudioPacket() { 
-
-    byte[] packetBytes = new byte[udpMaxPayload];
-    DatagramPacket packet = new DatagramPacket(packetBytes, packetBytes.length);
-
-    try { 
-      mcSocket.receive(packet);
-    } catch (SocketTimeoutException e) {
-      log("Timeout receiving multicast packet."); 
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
-
-    return packetBytes;
-  }
-/*
-  private byte[] mcReceiveAudioPacket() { 
-
-    byte[] packetBytes = new byte[udpMaxPayload];
-    DatagramPacket packet = new DatagramPacket(packetBytes, packetBytes.length);
-
-    try { 
-      mcSocket.receive(packet);
-    } catch (SocketTimeoutException e) {
-      log("Timeout receiving multicast packet."); 
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
-
-    return packetBytes;
-  }
-*/
 
   private byte[] getSoundBytesToSend() { 
     return soundBytesToSend;
@@ -273,6 +212,7 @@ public class SoundClient {
 
     int i = 0;
     
+    log("Sending sound to server thread.");
     while (i < soundBytesToSend.length - udpMaxPayload) { 
       //log("i: " + i);
       packet = new DatagramPacket(soundBytesToSend, i, udpMaxPayload, udpHost, udpPort);
@@ -433,35 +373,4 @@ public class SoundClient {
     logger(loggingName + "-" + getId(), msg);
   }
 
-  public static void oldMain(String[] args) { 
-
-    SoundClient soundClient = new SoundClient();  
-
-    soundClient.connectTcp();
-    soundClient.setUpTcpIo();
-    soundClient.requestAndSetId();
-    soundClient.requestAndSetRole();
-    soundClient.requestAndSetUdpPort();
-    soundClient.setUpUdp();
-
-    //soundClient.udpSendString("UDP test123"); // test multicast send
-
-    if (soundClient.getRole() == Role.SENDER) { 
-      soundClient.readSoundFileIntoByteArray(audioFilename);
-      //soundClient.playAudio(soundClient.getSoundBytesToSend()); // test play
-      //soundClient.tcpSendArrayLength();
-      while(true) { 
-        soundClient.udpSendSoundBytesToServerThread();
-      }
-    }
-
-    if (soundClient.getRole() == Role.RECEIVER) { 
-      soundClient.mcSetUpReceiver();
-      //soundClient.mcReceiveString(udpMaxPayload); // test multicast receive.
-      while(true) {
-        byte[] playBytes = soundClient.mcReceiveAudioBroadcast();
-        soundClient.playAudio(playBytes);
-      }
-    }
-  }
 }
