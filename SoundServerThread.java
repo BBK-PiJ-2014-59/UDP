@@ -2,6 +2,8 @@ import java.net.*;
 import java.io.*;
 import java.util.*;
 import java.util.regex.*;
+import java.util.concurrent.locks.ReentrantReadWriteLock; 
+
 import static util.SoundUtil.*;
 
 public class SoundServerThread extends Thread { 
@@ -14,7 +16,7 @@ public class SoundServerThread extends Thread {
   private boolean isFirstClient;
 
   private BufferedReader br;
-  private PrintWriter pw;
+  private PrintWriter printWriter;
   private InputStreamReader isr;
 
   private DatagramSocket udpSocket;
@@ -46,13 +48,16 @@ public class SoundServerThread extends Thread {
   private byte[] soundBytes;
   private int arrayLength; // todo: change variable name?
 
-  SoundServerThread(Socket s, int id, int port, boolean isFirst) { 
+  private ReentrantReadWriteLock lock;
+
+  SoundServerThread(Socket s, int id, int port, boolean isFirst, ReentrantReadWriteLock lock) { 
     tcpSocket = s;
     tcpClientId = id; 
     udpPort = port;
     isFirstClient = isFirst;
     clientRole = isFirstClient ? ClientRoles.SENDER : ClientRoles.RECEIVER;   
     udpIsUp = false;
+    this.lock = lock;
 
     log("Initialized to listen on UDP port " + udpPort);
   }
@@ -66,17 +71,32 @@ public class SoundServerThread extends Thread {
     if (clientRole == ClientRoles.SENDER) { 
       udpSetUpSocket();
       tcpExpectAndSetArrayLength();
-      udpReceiveAudioFromClient();
-      mcSetUpBroadcaster();
-      //mcTestSend();
-      while(true) { 
-        mcBroadcastAudio();
-        try { 
-          Thread.sleep(1100);
-        } catch (InterruptedException e) { 
-          e.printStackTrace();
-        }
+      while(true) {
+        if (soundBytes == null)
+          soundBytes = new byte[getArrayLength()]; 
+        lock.writeLock().lock(); // lock soundBytes so it can't be read by other ServerThreads.
+        log("Write lock obtained.");
+        try {
+          tcpSend("READY_TO_RECEIVE");
+          udpReceiveAudioFromClient(); // write soundBytes
+        } finally {
+          lock.writeLock().unlock(); // unlock soundBytes.
+        }       
       }
+    }
+
+    if (clientRole == ClientRoles.RECEIVER) { 
+
+    }
+  }
+
+  private void tcpWaitForMessage(String message) {
+    log("Waiting for TCP message from server: " + message);
+    try {
+      message = bufferedReader.readLine();
+      log("Received TCP message from server: " + message);
+    } catch (IOException e) {
+      e.printStackTrace();
     }
   }
 
@@ -89,7 +109,7 @@ public class SoundServerThread extends Thread {
     int i = 0;
 
     while (i < soundBytes.length - udpMaxPayload) {
-      log("i: " + i);
+      //log("i: " + i);
       mcPacket = new DatagramPacket(soundBytes, i, udpMaxPayload, mcGroup, mcPort);
       try {
         mcSocket.send(mcPacket);
@@ -128,8 +148,6 @@ public class SoundServerThread extends Thread {
 
   private void udpReceiveAudioFromClient() { 
     DatagramPacket packet;
-    int arrLen = getArrayLength();
-    soundBytes = new byte[arrLen]; 
     byte[] packetBytes = new byte[udpMaxPayload];
     
     int i = 0;
@@ -139,6 +157,7 @@ public class SoundServerThread extends Thread {
     log("Receiving byte " + i);
 
     // get packets with constant payload size (udpMaxPayload) 
+    int arrLen = getArrayLength();
     while (i < arrLen - udpMaxPayload) {
         packet = new DatagramPacket(packetBytes, packetBytes.length);
 
@@ -211,7 +230,7 @@ public class SoundServerThread extends Thread {
     try {
       isr = new InputStreamReader(tcpSocket.getInputStream());
       br = new BufferedReader(isr);
-      pw = new PrintWriter(tcpSocket.getOutputStream(), true);
+      printWriter = new PrintWriter(tcpSocket.getOutputStream(), true);
     } catch (IOException e) {
       e.printStackTrace();
     }
@@ -241,12 +260,17 @@ public class SoundServerThread extends Thread {
     log("Message from client received.");
     if (request.startsWith(expected)) {
       log("Message from client was as expected.");
-      pw.println(sendThis);
+      printWriter.println(sendThis);
       log("Sent this to client: " + sendThis);
     } else {
       log("Client sent this instead of '" + expected + "': " + request);
     }
     return request; 
+  }
+
+  private void tcpSend(String message) { 
+    log("Sending message to client: " + message);
+    printWriter.println(message);
   }
 
   private String tcpListen() { 

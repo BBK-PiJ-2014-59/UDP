@@ -1,6 +1,7 @@
 import java.net.*;
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static util.SoundUtil.*;
 
@@ -15,6 +16,13 @@ public class SoundServer {
   private final static int firstUdpPort = 42001;
   private int nextUdpPort;
   private boolean isFirstClient;
+
+  private static boolean fair = true;
+  private ReentrantReadWriteLock lock = new ReentrantReadWriteLock(fair);
+
+  // ServerThread "1" receives audio from sender client into the soundBytes array shared between the ServerThreads. ServerThread "1" (which handles the sender SoundClient) needs to lock it for writing before sending happens. Locking prevents the other ServerThreads from reading the array, if we use a ReentrantReadWriteLock(fair) lock, which should also guarantee that once the other ServerThreads have given up their (read) lock, and ServerThread "1" has been waiting the longest, it will get the lock and be able to write (again).
+
+  private byte[] soundBytes = null; 
 
   public SoundServer() { 
     defaultTcpPort = 789;
@@ -41,7 +49,7 @@ public class SoundServer {
 
     Socket socket = serverSocket.accept();
     log("Connection with client established.");
-    new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient).start();
+    new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock).start();
 
     isFirstClient = false;
 
@@ -50,7 +58,7 @@ public class SoundServer {
     while(true) { 
       socket = serverSocket.accept();
       log("Connection with client established.");
-      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient).start();
+      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock).start();
     }
   }
 

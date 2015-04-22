@@ -22,10 +22,15 @@ public class SoundClient {
   //private String role; // todo: use enum/check for valid role reply from server.
   //private String role; // todo: use enum/check for valid role reply from server.
 
-  private BufferedReader br;
-  private PrintWriter pw;
+  private BufferedReader bufferedReader;
+  private PrintWriter printWriter;
   private Socket sock;
   private InputStreamReader isr;
+
+  private boolean udpReceiverIsUp;
+
+  private DatagramSocket udpReceiverSocket;
+  private int udpReceiverPort;
 
   private DatagramSocket udpSocket;
   private InetAddress udpHost;
@@ -50,7 +55,8 @@ public class SoundClient {
     ID,
     ROLE,
     UDP_PORT,
-    ACK_LENGTH
+    ACK_LENGTH,
+    READY_TO_SEND
   }
 
   private enum Replies { 
@@ -69,6 +75,7 @@ public class SoundClient {
     tcpPort = port;
     id = defaultId;
     role = Role.NOT_SET;
+    udpReceiverIsUp = false;
   }
 
   public static void main(String[] args) { 
@@ -80,25 +87,43 @@ public class SoundClient {
     soundClient.requestAndSetId();
     soundClient.requestAndSetRole();
     soundClient.requestAndSetUdpPort();
-    soundClient.setUpUdp();
+    soundClient.setUpUdpSending();
 
-    //soundClient.udpSendString("UDP test123"); // test multicast send
 
     if (soundClient.getRole() == Role.SENDER) { 
       soundClient.readSoundFileIntoByteArray(audioFilename);
-      //soundClient.playAudio(soundClient.getSoundBytesToSend()); // test play
       soundClient.tcpSendArrayLength();
-      soundClient.udpSendSoundBytesToServerThread();
+      while(true) { 
+        soundClient.tcpWaitForMessage("READY_TO_RECEIVE");
+        soundClient.udpSendSoundBytesToServerThread();
+      }
     }
 
-    if (soundClient.getRole() == Role.RECEIVER) { 
-      soundClient.mcSetUpReceiver();
-      //soundClient.mcReceiveString(udpMaxPayload); // test multicast receive.
+    else if (soundClient.getRole() == Role.RECEIVER) { 
+      soundClient.udpSetUpReceiverSocket();
       while(true) {
         byte[] playBytes = soundClient.mcReceiveAudioBroadcast();
         soundClient.playAudio(playBytes);
       }
     }
+  }
+
+  private void udpSetUpReceiverSocket() {
+    if (!udpReceiverIsUp) {
+      try {
+        udpReceiverSocket = new DatagramSocket();
+        udpReceiverIsUp = true;
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+    }
+  }
+
+  private void oldSendLoop() { 
+      readSoundFileIntoByteArray(audioFilename);
+      playAudio(getSoundBytesToSend()); // test play
+      tcpSendArrayLength();
+      udpSendSoundBytesToServerThread();
   }
 
   private byte[] getSoundBytesToSend() { 
@@ -254,7 +279,7 @@ public class SoundClient {
   }
 
 
-  private void setUpUdp() { 
+  private void setUpUdpSending() { 
     try { 
       udpSocket = new DatagramSocket();
     } catch (IOException e) { 
@@ -292,9 +317,9 @@ public class SoundClient {
     log("Setting up TCP IO streams with server.");
     try { 
       isr = new InputStreamReader(sock.getInputStream());
-      br = new BufferedReader(isr);
-      //pw = new PrintWriter(sock.getOutputStream(), true); // true autoFlushes output buffer
-      pw = new PrintWriter(sock.getOutputStream(), true);
+      bufferedReader = new BufferedReader(isr);
+      //printWriter = new PrintWriter(sock.getOutputStream(), true); // true autoFlushes output buffer
+      printWriter = new PrintWriter(sock.getOutputStream(), true);
     } catch (IOException e) { 
       e.printStackTrace();
     }
@@ -354,11 +379,11 @@ public class SoundClient {
 
   private String tcpRequest(String request) { 
     String reply = null;
-    if (pw != null) { 
+    if (printWriter != null) { 
       log("Requesting " + request + " from server.");
-      pw.println(request);   
+      printWriter.println(request);   
       try { 
-        reply = br.readLine();
+        reply = bufferedReader.readLine();
       } catch (IOException e) { 
         e.printStackTrace(); 
       }
@@ -368,6 +393,32 @@ public class SoundClient {
     return reply;
   }
 
+  private String tcpSendAndWaitForReply(String message) { 
+    String reply = null;
+    if (printWriter != null) { 
+      log("Sent TCP message to server: " + message);
+      printWriter.println(message);   
+      try { 
+        reply = bufferedReader.readLine();
+        log("Received TCP reply from server: " + reply);
+      } catch (IOException e) { 
+        e.printStackTrace(); 
+      }
+    } else { 
+      log("Can't send message - no IO stream set up with server.");
+    }
+    return reply;
+  }
+
+  private void tcpWaitForMessage(String message) { 
+    log("Waiting for TCP message from server: " + message);
+    try { 
+      message = bufferedReader.readLine();
+      log("Received TCP message from server: " + message);
+    } catch (IOException e) { 
+      e.printStackTrace(); 
+    }
+  }
 
   private void log(String msg) { 
     logger(loggingName + "-" + getId(), msg);
