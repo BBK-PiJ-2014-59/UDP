@@ -45,12 +45,13 @@ public class SoundServerThread extends Thread {
   private static int mcPort = 10000;
 
   private static int udpMaxPayload = 512;
-  private byte[] soundBytes;
+  private byte[] soundBytes = null;
+  private List soundByteList soundByteList; // This will be the shared object. Initialize it before passing to threads.
   private int arrayLength; // todo: change variable name?
 
   private ReentrantReadWriteLock lock;
 
-  SoundServerThread(Socket s, int id, int port, boolean isFirst, ReentrantReadWriteLock lock) { 
+  SoundServerThread(Socket s, int id, int port, boolean isFirst, ReentrantReadWriteLock lock, byte[] soundBytes) { 
     tcpSocket = s;
     tcpClientId = id; 
     udpPort = port;
@@ -58,6 +59,7 @@ public class SoundServerThread extends Thread {
     clientRole = isFirstClient ? ClientRoles.SENDER : ClientRoles.RECEIVER;   
     udpIsUp = false;
     this.lock = lock;
+    this.soundBytes = soundBytes;
 
     log("Initialized to listen on UDP port " + udpPort);
   }
@@ -74,9 +76,10 @@ public class SoundServerThread extends Thread {
       int audioReceiveCount = 0;
       boolean lostConnection = false;
       while(true) {
+        System.out.println();
         log("Audio receive count: " + audioReceiveCount++);
-        if (soundBytes == null)
-          soundBytes = new byte[getArrayLength()]; 
+        log("Initializing sound storage array of length " + getArrayLength());
+        soundBytes = new byte[getArrayLength()]; 
         lock.writeLock().lock(); // lock soundBytes so it can't be read by other ServerThreads.
         log("Write lock obtained.");
         try {
@@ -91,18 +94,24 @@ public class SoundServerThread extends Thread {
             udpReceiveAudioFromClient(); // write soundBytes
         } finally {
           lock.writeLock().unlock(); // unlock soundBytes.
+          log("Write lock released.");
         }       
       }
     }
 
     if (clientRole == ClientRoles.RECEIVER) { 
-      tcpWaitForMessage("READY_TO_RECEIVE");  
-      tcpSendArrayLength();
-      tcpSend("SEND_UDP_PORT");
-      String reply = tcpListen();
+      tcpWaitForMessage("READY_FOR_ARRAY_LENGTH"); 
+      tcpSend(new Integer(getArrayLength()).toString());
+      tcpSend("READY_FOR_UDP_PORT"); // race condition?
+      String reply = tcpListen(); // todo: check for null
       int port = Integer.parseInt(reply);
+      tcpWaitForMessage("READY_TO_RECEIVE");  
+      //tcpSendArrayLength();
+      lock.readLock().lock(); // lock soundBytes so it can't be written by the ServerThread handling sender client.
+      log("Read lock obtained.");
       udpSendSoundBytesToClient(port);
-      
+      lock.readLock().unlock(); 
+      log("Read lock released.");
 
     }
   }
@@ -114,6 +123,7 @@ public class SoundServerThread extends Thread {
 
     int i = 0;
 
+    log("soundBytes: " + soundBytes);
     log("Sending sound to client.");
     while (i < soundBytes.length - udpMaxPayload) {
       //log("i: " + i);
@@ -335,7 +345,7 @@ public class SoundServerThread extends Thread {
   }
 
   private void tcpSend(String message) { 
-    log("Sending TCP message to client: " + message);
+    log("Sending TCP message: " + message);
     printWriter.println(message);
   }
 

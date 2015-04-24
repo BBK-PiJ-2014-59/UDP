@@ -106,6 +106,11 @@ public class SoundClient {
           break;
         }
         soundClient.tcpSend("READY_TO_SEND");
+        try {
+          Thread.sleep(1000); // todo: remove after testing?
+        } catch (InterruptedException e) {
+          e.printStackTrace();
+        }
         soundClient.udpSendSoundBytesToServerThread();
       }
     }
@@ -113,12 +118,17 @@ public class SoundClient {
     else if (soundClient.getRole() == Role.RECEIVER) { 
       soundClient.udpSetUpReceiverSocket();
       while(true) {
-        soundClient.tcpSend("READY_TO_RECEIVE"); // bug: how do we know this was even heard?
-        soundClient.tcpExpectAndSetArrayLength();
+
+        System.out.println();
+        soundClient.tcpSend("READY_FOR_ARRAY_LENGTH"); // todo: what if this is sent before ServerThread does tcpWaitForMessage("READY_FOR_ARRAY_LENGTH")? Not heard!!
+        String length = soundClient.tcpListen(); // todo: what if connection is broken and length is null? Add exception handling to tcpListen();
+        soundClient.log("Received array length: " + length);
+        soundClient.setArrayLength(Integer.parseInt(length)); 
         if (soundClient.soundBytes == null)   
           soundClient.soundBytes = new byte[soundClient.getArrayLength()];
-        soundClient.tcpWaitForMessage("SEND_UDP_PORT");
+        soundClient.tcpWaitForMessage("READY_FOR_UDP_PORT");
         soundClient.tcpSend(new Integer(soundClient.getUdpReceiverPort()).toString());
+        soundClient.tcpSend("READY_TO_RECEIVE"); // 
         soundClient.udpReceiveAudioFromSender();
         soundClient.playAudio(soundClient.soundBytes); // should this be non-threaded?
       }
@@ -536,7 +546,7 @@ public class SoundClient {
   private String tcpSendAndWaitForReply(String message) { 
     String reply = null;
     if (printWriter != null) { 
-      log("Sent TCP message to server: " + message);
+      log("Sent TCP message: " + message);
       printWriter.println(message);   
       try { 
         reply = bufferedReader.readLine();
@@ -551,10 +561,10 @@ public class SoundClient {
   }
 
   private String tcpWaitForMessage(String message) { 
-    log("Waiting for TCP message from server: " + message);
+    log("Waiting for TCP message: " + message);
     try { 
       message = bufferedReader.readLine();
-      log("Received TCP message from server: " + message);
+      log("Received TCP message: " + message);
     } catch (IOException e) { 
       e.printStackTrace(); 
     }

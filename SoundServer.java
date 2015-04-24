@@ -50,7 +50,7 @@ public class SoundServer {
 
     Socket socket = serverSocket.accept();
     log("Connection with first client established. This client will be the sender.");
-    new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock).start();
+    new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, soundBytes).start();
 
     isFirstClient = false;
 
@@ -59,7 +59,7 @@ public class SoundServer {
     while(true) { 
       socket = serverSocket.accept();
       log("Connection with additional client established. This client will be a receiver.");
-      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock).start();
+      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, soundBytes).start();
     }
   }
 
