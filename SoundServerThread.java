@@ -15,7 +15,7 @@ public class SoundServerThread extends Thread {
   private ClientRoles clientRole;
   private boolean isFirstClient;
 
-  private BufferedReader br;
+  private BufferedReader bufferedReader;
   private PrintWriter printWriter;
   private InputStreamReader isr;
 
@@ -71,14 +71,24 @@ public class SoundServerThread extends Thread {
     if (clientRole == ClientRoles.SENDER) { 
       udpSetUpSocket();
       tcpExpectAndSetArrayLength();
+      int audioReceiveCount = 0;
+      boolean lostConnection = false;
       while(true) {
+        log("Audio receive count: " + audioReceiveCount++);
         if (soundBytes == null)
           soundBytes = new byte[getArrayLength()]; 
         lock.writeLock().lock(); // lock soundBytes so it can't be read by other ServerThreads.
         log("Write lock obtained.");
         try {
           tcpSend("READY_TO_RECEIVE");
-          udpReceiveAudioFromClient(); // write soundBytes
+          String reply = tcpListen();
+          //if (reply == "READY_TO_SEND")
+          if (reply == null) {
+            log("Lost connection with sender client");
+            lostConnection = true; 
+            break;
+          } else if (reply.equals("READY_TO_SEND"))
+            udpReceiveAudioFromClient(); // write soundBytes
         } finally {
           lock.writeLock().unlock(); // unlock soundBytes.
         }       
@@ -86,15 +96,71 @@ public class SoundServerThread extends Thread {
     }
 
     if (clientRole == ClientRoles.RECEIVER) { 
+      tcpWaitForMessage("READY_TO_RECEIVE");  
+      tcpSendArrayLength();
+      tcpSend("SEND_UDP_PORT");
+      String reply = tcpListen();
+      int port = Integer.parseInt(reply);
+      udpSendSoundBytesToClient(port);
+      
 
     }
   }
 
+
+  private void udpSendSoundBytesToClient(int udpPort) {
+
+    DatagramPacket packet;
+
+    int i = 0;
+
+    log("Sending sound to client.");
+    while (i < soundBytes.length - udpMaxPayload) {
+      //log("i: " + i);
+      packet = new DatagramPacket(soundBytes, i, udpMaxPayload, tcpSocket.getInetAddress(), udpPort);
+      try {
+        udpSocket.send(packet);
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+      i += udpMaxPayload;
+    }
+  }
+
+
+  private String tcpRequest(String request) {
+    String reply = null;
+    if (printWriter != null) {
+      log("Requesting " + request + " from server.");
+      printWriter.println(request);
+      try {
+        reply = bufferedReader.readLine();
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+    } else {
+      log("Can't request " + request + " - no IO stream set up with server.");
+    }
+    return reply;
+  }
+
+  private void tcpSendArrayLength() {
+    String request = Replies.ACK_LENGTH.toString() + " " + soundBytes.length;
+    String reply = tcpRequest(request);
+
+    if (reply != null && reply.startsWith(Replies.ACK_LENGTH.toString()))
+      log("Server thread says it's ready to receive audio of requested length.");
+    else {
+      log("Unexpected reply when sending array length.");
+      // todo: handle problem (need to do this everwhere if there's time)
+    }
+  }
+
   private void tcpWaitForMessage(String message) {
-    log("Waiting for TCP message from server: " + message);
+    log("Waiting for TCP message: " + message);
     try {
       message = bufferedReader.readLine();
-      log("Received TCP message from server: " + message);
+      log("Received TCP message: " + message);
     } catch (IOException e) {
       e.printStackTrace();
     }
@@ -229,7 +295,7 @@ public class SoundServerThread extends Thread {
     log("Setting up TCP IO stream with client.");
     try {
       isr = new InputStreamReader(tcpSocket.getInputStream());
-      br = new BufferedReader(isr);
+      bufferedReader = new BufferedReader(isr);
       printWriter = new PrintWriter(tcpSocket.getOutputStream(), true);
     } catch (IOException e) {
       e.printStackTrace();
@@ -269,14 +335,14 @@ public class SoundServerThread extends Thread {
   }
 
   private void tcpSend(String message) { 
-    log("Sending message to client: " + message);
+    log("Sending TCP message to client: " + message);
     printWriter.println(message);
   }
 
   private String tcpListen() { 
     String msg = null;
     try {
-      msg = br.readLine();
+      msg = bufferedReader.readLine();
     } catch (IOException e) {
       e.printStackTrace();
     }

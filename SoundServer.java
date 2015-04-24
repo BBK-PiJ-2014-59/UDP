@@ -41,6 +41,7 @@ public class SoundServer {
   }
 
   void start() throws IOException { 
+    log("Starting SoundServer");
     log("Creating TCP socket.");
     serverSocket = new ServerSocket(defaultTcpPort); 
     log("Listening for TCP client.");
@@ -48,7 +49,7 @@ public class SoundServer {
     // A thread handles each client. First client will end up sender.
 
     Socket socket = serverSocket.accept();
-    log("Connection with client established.");
+    log("Connection with first client established. This client will be the sender.");
     new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock).start();
 
     isFirstClient = false;
@@ -57,7 +58,7 @@ public class SoundServer {
 
     while(true) { 
       socket = serverSocket.accept();
-      log("Connection with client established.");
+      log("Connection with additional client established. This client will be a receiver.");
       new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock).start();
     }
   }

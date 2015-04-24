@@ -1,6 +1,7 @@
 import java.io.*;
 import java.nio.file.*;
 import java.net.*;
+import java.util.regex.*;
 import javax.sound.sampled.*;
 
 import static util.SoundUtil.*;
@@ -66,6 +67,9 @@ public class SoundClient {
   byte[] soundBytesToSend; // if sender
   byte[] soundBytesToPlay; // if receiver
 
+  byte[] soundBytes;
+  private int arrayLength; // todo: change variable name?
+
   public SoundClient() {
     this(defaultHost, defaultPort);
   }
@@ -93,8 +97,15 @@ public class SoundClient {
     if (soundClient.getRole() == Role.SENDER) { 
       soundClient.readSoundFileIntoByteArray(audioFilename);
       soundClient.tcpSendArrayLength();
+      int audioSendCount = 0;
       while(true) { 
-        soundClient.tcpWaitForMessage("READY_TO_RECEIVE");
+        soundClient.log("Audio send count: " + audioSendCount++);
+        String reply = soundClient.tcpWaitForMessage("READY_TO_RECEIVE");
+        if (reply == null) {
+          soundClient.log("Lost connection with receiver on server thread.");
+          break;
+        }
+        soundClient.tcpSend("READY_TO_SEND");
         soundClient.udpSendSoundBytesToServerThread();
       }
     }
@@ -102,11 +113,135 @@ public class SoundClient {
     else if (soundClient.getRole() == Role.RECEIVER) { 
       soundClient.udpSetUpReceiverSocket();
       while(true) {
-        byte[] playBytes = soundClient.mcReceiveAudioBroadcast();
-        soundClient.playAudio(playBytes);
+        soundClient.tcpSend("READY_TO_RECEIVE"); // bug: how do we know this was even heard?
+        soundClient.tcpExpectAndSetArrayLength();
+        if (soundClient.soundBytes == null)   
+          soundClient.soundBytes = new byte[soundClient.getArrayLength()];
+        soundClient.tcpWaitForMessage("SEND_UDP_PORT");
+        soundClient.tcpSend(new Integer(soundClient.getUdpReceiverPort()).toString());
+        soundClient.udpReceiveAudioFromSender();
+        soundClient.playAudio(soundClient.soundBytes); // should this be non-threaded?
       }
     }
   }
+
+
+  private int getUdpReceiverPort() {
+    return udpReceiverSocket.getLocalPort();
+  }
+
+  private void udpSetTimeout(int ms) {
+    try {
+      udpSocket.setSoTimeout(ms);
+    } catch (SocketException e) {
+      e.printStackTrace();
+    }
+  }
+
+  
+  private void udpReceiveAudioFromSender() {
+    DatagramPacket packet;
+    byte[] packetBytes = new byte[udpMaxPayload];
+
+    int i = 0;
+
+    udpSetTimeout(100);
+
+    log("Receiving byte " + i);
+
+    // get packets with constant payload size (udpMaxPayload)
+    int arrLen = getArrayLength();
+    while (i < arrLen - udpMaxPayload) {
+        packet = new DatagramPacket(packetBytes, packetBytes.length);
+
+        try {
+          udpSocket.receive(packet);
+        } catch (SocketTimeoutException e) {
+          break; // This is the normal course of events.
+        } catch (IOException e) {
+          e.printStackTrace();
+        }
+
+        System.arraycopy(packetBytes, 0, soundBytes, i, packetBytes.length);
+        i += udpMaxPayload;
+    }
+
+    //udpSetTimeout(5000); // todo: remove because for testing only, ie so we have time to start client in terminal.
+
+    // get final packet, size being what ever is left after getting contant length packets.
+    if (i < arrLen) {
+      int finLen = arrLen - i;
+      byte[] finBytes = new byte[finLen];
+      packet = new DatagramPacket(finBytes, finLen);
+
+      try {
+        udpSocket.receive(packet);
+      } catch (SocketTimeoutException e) {
+        //break; // This is the normal course of events.
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+
+      System.arraycopy(finBytes, 0, soundBytes, i, finLen);
+      i += finLen;
+    }
+
+
+    log("Received final byte: " + i);
+
+    udpSetTimeout(100);
+
+  }
+
+  private String tcpListen() {
+    String msg = null;
+    try {
+      msg = bufferedReader.readLine();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+    return msg;
+  }
+
+  private String tcpExpectAndSend(String expected, String sendThis) {
+    String request = null;
+    log("Waiting for message from SoundServerThread: " + expected);
+    request = tcpListen();
+    log("Message received.");
+    if (request.startsWith(expected)) {
+      log("Message received was as expected.");
+      printWriter.println(sendThis);
+      log("Sent this message: " + sendThis);
+    } else {
+      log("SoundServerThread sent this instead of '" + expected + "': " + request);
+    }
+    return request;
+  }
+
+  private void tcpExpectAndSetArrayLength() {
+    String request = tcpExpectAndSend("ACK_LENGTH", "ACK_LENGTH"); // todo: rewrite, this is confusing.
+    Pattern p = Pattern.compile("\\d+");
+    Matcher m = p.matcher(request);
+    m.find();
+    setArrayLength(Integer.parseInt(m.group(0)));
+    log("Array length set to " + getArrayLength());
+  }
+  
+  private void setArrayLength(int len) {
+    arrayLength = len;
+  }
+
+  private int getArrayLength() {
+    return arrayLength;
+  }
+
+
+
+  private void tcpSend(String message) {
+    log("Sending TCP message: " + message);
+    printWriter.println(message);
+  }
+
 
   private void udpSetUpReceiverSocket() {
     if (!udpReceiverIsUp) {
@@ -363,16 +498,21 @@ public class SoundClient {
     String request = "ROLE";
     String reply = tcpRequest(request);
 
-    if (reply.contains("RECEIVER")) 
-      role = Role.RECEIVER;
-    if (reply.contains("SENDER"))
-      role = Role.SENDER;
-    log("Role set to " + getRole()); 
-
     if (reply == null) 
       log("Got null reply from server when requesting " + request);
-    else
-      log("Unexpected reply from server when requesting " + request + ": " + reply);
+    else {
+      if (reply.contains("RECEIVER")) { 
+        role = Role.RECEIVER;
+        log("Role set to " + getRole()); 
+      }
+      else if (reply.contains("SENDER")) {
+        role = Role.SENDER;
+        log("Role set to " + getRole()); 
+      }
+      else {
+        log("Unexpected reply from server when requesting " + request + ": " + reply);
+      }
+    }
 
     // todo: add exceptions (everywhere) for bad/no replies.
   }
@@ -410,7 +550,7 @@ public class SoundClient {
     return reply;
   }
 
-  private void tcpWaitForMessage(String message) { 
+  private String tcpWaitForMessage(String message) { 
     log("Waiting for TCP message from server: " + message);
     try { 
       message = bufferedReader.readLine();
@@ -418,6 +558,7 @@ public class SoundClient {
     } catch (IOException e) { 
       e.printStackTrace(); 
     }
+    return message;
   }
 
   private void log(String msg) { 
