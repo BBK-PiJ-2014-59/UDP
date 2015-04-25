@@ -100,6 +100,7 @@ public class SoundClient {
       soundClient.tcpSendArrayLength();
       int audioSendCount = 0;
       while(true) { 
+        System.out.println();
         soundClient.log("Audio send count: " + audioSendCount++);
         String reply = soundClient.tcpWaitForMessage("READY_TO_RECEIVE");
         if (reply == null) {
@@ -196,6 +197,7 @@ public class SoundClient {
 
     //udpSetTimeout(5000); // todo: remove because for testing only, ie so we have time to start client in terminal.
 
+    /*
     // get final packet, size being what ever is left after getting contant length packets.
     if (i < arrLen) {
       int finLen = arrLen - i;
@@ -213,6 +215,7 @@ public class SoundClient {
       System.arraycopy(finBytes, 0, soundBytes, i, finLen);
       i += finLen;
     }
+    */
 
 
     log("Received final byte: " + i);
