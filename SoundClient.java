@@ -126,8 +126,7 @@ public class SoundClient {
         String length = soundClient.tcpListen(); // todo: what if connection is broken and length is null? Add exception handling to tcpListen();
         soundClient.log("Received array length: " + length);
         soundClient.setArrayLength(Integer.parseInt(length)); 
-        if (soundClient.soundBytes == null)   
-          soundClient.soundBytes = new byte[soundClient.getArrayLength()];
+        soundClient.soundBytes = new byte[soundClient.getArrayLength()];
         soundClient.tcpWaitForMessage("READY_FOR_UDP_PORT");
         soundClient.tcpSend(new Integer(soundClient.getUdpReceiverPort()).toString());
         soundClient.tcpSend("READY_TO_RECEIVE"); // 
@@ -165,7 +164,7 @@ public class SoundClient {
     DatagramPacket packet;
     byte[] packetBytes = new byte[udpMaxPayload];
 
-    int i = 0;
+    int byteI = 0;
 
     try {
       udpReceiverSocket.setSoTimeout(2000);
@@ -173,12 +172,12 @@ public class SoundClient {
       e.printStackTrace();
     }
 
-    //log("Receiving byte " + i);
+    //log("Receiving byte " + byteI);
 
     // get packets with constant payload size (udpMaxPayload)
     int arrLen = getArrayLength();
-    while (i < arrLen - udpMaxPayload) {
-        log("Receiving byte " + i);
+    while (byteI < arrLen - udpMaxPayload) {
+        //log("Receiving byte " + byteI);
         packet = new DatagramPacket(packetBytes, packetBytes.length);
 
         try {
@@ -191,16 +190,25 @@ public class SoundClient {
           e.printStackTrace();
         }
 
-        System.arraycopy(packetBytes, 0, soundBytes, i, packetBytes.length);
-        i += udpMaxPayload;
+        try { 
+          System.arraycopy(packetBytes, 0, soundBytes, byteI, packetBytes.length);
+        } catch (ArrayIndexOutOfBoundsException e) { 
+          e.printStackTrace();
+          log("packetBytes.length: " + packetBytes.length);
+          log("soundBytes.length: " + soundBytes.length);
+          log("byteI: " + byteI);
+          log("arrLen: " + arrLen);
+        }
+
+        byteI += udpMaxPayload;
     }
 
     //udpSetTimeout(5000); // todo: remove because for testing only, ie so we have time to start client in terminal.
 
     /*
     // get final packet, size being what ever is left after getting contant length packets.
-    if (i < arrLen) {
-      int finLen = arrLen - i;
+    if (byteI < arrLen) {
+      int finLen = arrLen - byteI;
       byte[] finBytes = new byte[finLen];
       packet = new DatagramPacket(finBytes, finLen);
 
@@ -212,13 +220,13 @@ public class SoundClient {
         e.printStackTrace();
       }
 
-      System.arraycopy(finBytes, 0, soundBytes, i, finLen);
-      i += finLen;
+      System.arraycopy(finBytes, 0, soundBytes, byteI, finLen);
+      byteI += finLen;
     }
     */
 
 
-    log("Received final byte: " + i);
+    log("Received final byte: " + byteI);
 
     udpSetTimeout(100);
 
