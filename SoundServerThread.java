@@ -3,12 +3,15 @@ import java.io.*;
 import java.util.*;
 import java.util.regex.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock; 
+import javax.sound.sampled.*; // for testing only
 
 import static util.SoundUtil.*;
 
 public class SoundServerThread extends Thread { 
 
   private static String programName = "SoundServerThread";
+
+  private static String defaultHost = "localhost"; // for local testing
 
   private Socket tcpSocket;
   private Integer tcpClientId;
@@ -46,12 +49,15 @@ public class SoundServerThread extends Thread {
 
   private static int udpMaxPayload = 512;
   private byte[] soundBytes = null;
-  private List soundByteList soundByteList; // This will be the shared object. Initialize it before passing to threads.
+  private ByteArrayOutputStream byteStream; // object shared between threads for storing audio.
   private int arrayLength; // todo: change variable name?
 
   private ReentrantReadWriteLock lock;
 
-  SoundServerThread(Socket s, int id, int port, boolean isFirst, ReentrantReadWriteLock lock, byte[] soundBytes) { 
+  private DatagramSocket udpSenderSocket;
+  private InetAddress udpReceiverHost;
+
+  SoundServerThread(Socket s, int id, int port, boolean isFirst, ReentrantReadWriteLock lock, ByteArrayOutputStream byteStream) { 
     tcpSocket = s;
     tcpClientId = id; 
     udpPort = port;
@@ -59,7 +65,7 @@ public class SoundServerThread extends Thread {
     clientRole = isFirstClient ? ClientRoles.SENDER : ClientRoles.RECEIVER;   
     udpIsUp = false;
     this.lock = lock;
-    this.soundBytes = soundBytes;
+    this.byteStream = byteStream;
 
     log("Initialized to listen on UDP port " + udpPort);
   }
@@ -80,11 +86,18 @@ public class SoundServerThread extends Thread {
         log("Audio receive count: " + audioReceiveCount++);
         log("Initializing sound storage array of length " + getArrayLength());
         soundBytes = new byte[getArrayLength()]; 
+        log("Waiting for write lock.");
         lock.writeLock().lock(); // lock soundBytes so it can't be read by other ServerThreads.
         log("Write lock obtained.");
         try {
+          try {
+            Thread.sleep(2000);
+          } catch (InterruptedException e) { 
+            e.printStackTrace();
+          }
           tcpSend("READY_TO_RECEIVE");
           String reply = tcpListen();
+          //String reply = tcpListenInTimeoutLoop();
           //if (reply == "READY_TO_SEND")
           if (reply == null) {
             log("Lost connection with sender client");
@@ -92,6 +105,7 @@ public class SoundServerThread extends Thread {
             break;
           } else if (reply.equals("READY_TO_SEND"))
             udpReceiveAudioFromClient(); // write soundBytes
+            //playTest();
         } finally {
           lock.writeLock().unlock(); // unlock soundBytes.
           log("Write lock released.");
@@ -101,14 +115,19 @@ public class SoundServerThread extends Thread {
 
     if (clientRole == ClientRoles.RECEIVER) { 
       tcpWaitForMessage("READY_FOR_ARRAY_LENGTH"); 
-      tcpSend(new Integer(getArrayLength()).toString());
+      log("Waiting for read lock.");
+      lock.readLock().lock(); // lock soundBytes so it can't be written by the ServerThread handling sender client.
+      log("Read lock obtained.");
+      //tcpSend(new Integer(getArrayLength()).toString());
+      log("byteStream.size(): " + byteStream.size());
+      tcpSend(new Integer(byteStream.size()).toString());
       tcpSend("READY_FOR_UDP_PORT"); // race condition?
       String reply = tcpListen(); // todo: check for null
       int port = Integer.parseInt(reply);
+      log("Received receiver's UDP port: " + port);
+      udpSetUpSenderSocket();
       tcpWaitForMessage("READY_TO_RECEIVE");  
       //tcpSendArrayLength();
-      lock.readLock().lock(); // lock soundBytes so it can't be written by the ServerThread handling sender client.
-      log("Read lock obtained.");
       udpSendSoundBytesToClient(port);
       lock.readLock().unlock(); 
       log("Read lock released.");
@@ -116,6 +135,71 @@ public class SoundServerThread extends Thread {
     }
   }
 
+  private void udpSetUpSenderSocket() {
+    try {
+      log("Setting up UDP sender socket.");
+      udpSenderSocket = new DatagramSocket();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+    try {
+      udpReceiverHost = InetAddress.getByName(defaultHost); // todo: get it working over the network.
+    } catch (UnknownHostException e) {
+      e.printStackTrace();
+    }
+  }
+
+
+  private void playTest() {
+    log("Play test.");
+
+    try {
+      //ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
+      ByteArrayInputStream bais = new ByteArrayInputStream(byteStream.toByteArray());
+      log("available: " + bais.available());
+
+      AudioInputStream stream; // input stream with format and length
+      AudioFormat format;
+      DataLine.Info info;
+      Clip clip;
+
+      stream = AudioSystem.getAudioInputStream(bais);
+      format = stream.getFormat();
+      info = new DataLine.Info(Clip.class, format);
+      clip = (Clip) AudioSystem.getLine(info);
+      clip.open(stream);
+      clip.start();
+      do {
+        Thread.sleep(1);
+      } while (clip.isActive());
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+
+  }
+
+  private void udpSendSoundBytesToClient2(int udpPort) {
+
+    DatagramPacket packet;
+
+    int i = 0;
+
+    //log("soundBytes: " + soundBytes);
+    log("Sending sound to client.");
+    byte[] soundBytes = byteStream.toByteArray();
+    while (i < soundBytes.length - udpMaxPayload) {
+      //log("i: " + i);
+      packet = new DatagramPacket(soundBytes, i, udpMaxPayload, tcpSocket.getInetAddress(), udpPort);
+      if (packet == null) log("null packet");
+      try {
+        if (udpSenderSocket == null) log("null udpSenderSocket");
+        udpSenderSocket.send(packet);
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+      i += udpMaxPayload;
+    }
+  }
 
   private void udpSendSoundBytesToClient(int udpPort) {
 
@@ -123,13 +207,16 @@ public class SoundServerThread extends Thread {
 
     int i = 0;
 
-    log("soundBytes: " + soundBytes);
+    //log("soundBytes: " + soundBytes);
     log("Sending sound to client.");
-    while (i < soundBytes.length - udpMaxPayload) {
+    byte[] bytes = byteStream.toByteArray();
+    while (i < bytes.length - udpMaxPayload) {
       //log("i: " + i);
-      packet = new DatagramPacket(soundBytes, i, udpMaxPayload, tcpSocket.getInetAddress(), udpPort);
+      packet = new DatagramPacket(bytes, i, udpMaxPayload, tcpSocket.getInetAddress(), udpPort);
+      if (packet == null) log("null packet");
       try {
-        udpSocket.send(packet);
+        if (udpSenderSocket == null) log("null udpSenderSocket");
+        udpSenderSocket.send(packet);
       } catch (IOException e) {
         e.printStackTrace();
       }
@@ -226,34 +313,56 @@ public class SoundServerThread extends Thread {
     DatagramPacket packet;
     byte[] packetBytes = new byte[udpMaxPayload];
     
-    int i = 0;
   
-    udpSetTimeout(100);
+    udpSetTimeout(1000);
 
-    log("Receiving byte " + i);
+    byteStream.reset(); // clear it, otherwise we're just appending.
+
 
     // get packets with constant payload size (udpMaxPayload) 
     int arrLen = getArrayLength();
+    int i = 0;
+    log("Receiving byte " + i);
+    log("Array length: " + arrLen);
+    /*
+    try { 
+      log("UDP buf size: " + udpSocket.getReceiveBufferSize());
+      udpSocket.setReceiveBufferSize(udpSocket.getReceiveBufferSize()*2); // not helping
+      log("UDP buf size: " + udpSocket.getReceiveBufferSize());
+    } catch (SocketException e) { 
+      e.printStackTrace();
+    }
+    */
+
     while (i < arrLen - udpMaxPayload) {
+        //log("i: " + i); 
         packet = new DatagramPacket(packetBytes, packetBytes.length);
 
         try {
           udpSocket.receive(packet);
         } catch (SocketTimeoutException e) {
+          log("**** UDP TIMEOUT ****"); 
           break; // This is the normal course of events.
         } catch (IOException e) { 
           e.printStackTrace(); 
         }
 
-        System.arraycopy(packetBytes, 0, soundBytes, i, packetBytes.length);
+        //System.arraycopy(packetBytes, 0, soundBytes, i, packetBytes.length);
+        //log("packetBytes.length: " + packetBytes.length);
+        byteStream.write(packetBytes, 0, packetBytes.length);
+        //log("byteStream.size(): " + byteStream.size());
         i += udpMaxPayload;
     }
 
+        log("byteStream.size(): " + byteStream.size());
+        log("i: " + i); 
     //udpSetTimeout(5000); // todo: remove because for testing only, ie so we have time to start client in terminal.
 
+/*
     // get final packet, size being what ever is left after getting contant length packets.
     if (i < arrLen) { 
       int finLen = arrLen - i;
+      log("Last packet length: " + finLen);
       byte[] finBytes = new byte[finLen];
       packet = new DatagramPacket(finBytes, finLen);
 
@@ -265,12 +374,16 @@ public class SoundServerThread extends Thread {
         e.printStackTrace(); 
       }
 
-      System.arraycopy(finBytes, 0, soundBytes, i, finLen);
+      //System.arraycopy(finBytes, 0, soundBytes, i, finLen);
+      byteStream.write(finBytes, 0, finBytes.length);
       i += finLen;
     }
+*/
 
 
     log("Received final byte: " + i);
+
+    log("byteStream.size(): " + byteStream.size());
 
     udpSetTimeout(100); 
 
@@ -359,9 +472,27 @@ public class SoundServerThread extends Thread {
     return msg;
   }
 
+  private String tcpListenInTimeoutLoop() { 
+    String msg = null;
+    int to = 0;
+    try { 
+      to = tcpSocket.getSoTimeout();
+    } catch (SocketException e) { 
+      e.printStackTrace();
+    }
+    log("TCP timeout: " + to); 
+    try {
+      msg = bufferedReader.readLine();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+    return msg;
+  }
+
   private void udpSetUpSocket() {
     if (!udpIsUp) { 
       try {
+        log("Instantiating UDP datagram socket.");
         udpSocket = new DatagramSocket(udpPort);
         udpIsUp = true;
       } catch (IOException e) {

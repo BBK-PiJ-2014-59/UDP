@@ -3,6 +3,7 @@ import java.nio.file.*;
 import java.net.*;
 import java.util.regex.*;
 import javax.sound.sampled.*;
+import javax.sound.sampled.LineEvent.Type;
 
 import static util.SoundUtil.*;
 
@@ -130,7 +131,17 @@ public class SoundClient {
         soundClient.tcpSend(new Integer(soundClient.getUdpReceiverPort()).toString());
         soundClient.tcpSend("READY_TO_RECEIVE"); // 
         soundClient.udpReceiveAudioFromSender();
-        soundClient.playAudio(soundClient.soundBytes); // should this be non-threaded?
+        //soundClient.playAudio(soundClient.soundBytes); // should this be non-threaded?
+        soundClient.playAudio2(soundClient.soundBytes); // should this be non-threaded?
+        //soundClient.playAudio4(soundClient.soundBytes); // should this be non-threaded?
+        //playTest();
+        /*
+        try {
+          soundClient.playClip2(soundClient.soundBytes);
+        } catch (Exception e) { 
+          e.printStackTrace();
+        }
+        */
       }
     }
   }
@@ -155,18 +166,25 @@ public class SoundClient {
 
     int i = 0;
 
-    udpSetTimeout(100);
+    try {
+      udpReceiverSocket.setSoTimeout(2000);
+    } catch (SocketException e) {
+      e.printStackTrace();
+    }
 
-    log("Receiving byte " + i);
+    //log("Receiving byte " + i);
 
     // get packets with constant payload size (udpMaxPayload)
     int arrLen = getArrayLength();
     while (i < arrLen - udpMaxPayload) {
+        log("Receiving byte " + i);
         packet = new DatagramPacket(packetBytes, packetBytes.length);
 
         try {
-          udpSocket.receive(packet);
+          //udpSocket.receive(packet);
+          udpReceiverSocket.receive(packet);
         } catch (SocketTimeoutException e) {
+          log("**** UDP TIMEOUT ****");
           break; // This is the normal course of events.
         } catch (IOException e) {
           e.printStackTrace();
@@ -185,7 +203,7 @@ public class SoundClient {
       packet = new DatagramPacket(finBytes, finLen);
 
       try {
-        udpSocket.receive(packet);
+        udpReceiverSocket.receive(packet);
       } catch (SocketTimeoutException e) {
         //break; // This is the normal course of events.
       } catch (IOException e) {
@@ -264,13 +282,6 @@ public class SoundClient {
     }
   }
 
-  private void oldSendLoop() { 
-      readSoundFileIntoByteArray(audioFilename);
-      playAudio(getSoundBytesToSend()); // test play
-      tcpSendArrayLength();
-      udpSendSoundBytesToServerThread();
-  }
-
   private byte[] getSoundBytesToSend() { 
     return soundBytesToSend;
   }
@@ -279,7 +290,104 @@ public class SoundClient {
     return soundBytesToPlay;
   }
 
-  private void playAudio(byte[] bytes) {
+  public static void playTest() {
+    try {
+        String filename = "Roland-JX-8P-Bell-C5.wav";
+        File yourFile = new File(filename);
+        AudioInputStream stream; // input stream with format and length
+        AudioFormat format;
+        DataLine.Info info;
+        Clip clip;
+
+        stream = AudioSystem.getAudioInputStream(yourFile);
+        format = stream.getFormat();
+        info = new DataLine.Info(Clip.class, format);
+        clip = (Clip) AudioSystem.getLine(info);
+        clip.open(stream);
+        clip.start();
+        do {
+          Thread.sleep(1);
+        } while (clip.isActive());
+    }
+    catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+private static void playClip(File clipFile) throws IOException, UnsupportedAudioFileException, LineUnavailableException, InterruptedException
+{
+  class AudioListener implements LineListener {
+    private boolean done = false;
+    @Override public synchronized void update(LineEvent event) {
+      Type eventType = event.getType();
+      if (eventType == Type.STOP || eventType == Type.CLOSE) {
+        done = true;
+        notifyAll();
+      }
+    }
+    public synchronized void waitUntilDone() throws InterruptedException {
+      while (!done) { wait(); }
+    }
+  }
+  AudioListener listener = new AudioListener();
+  AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(clipFile);
+  try {
+    Clip clip = AudioSystem.getClip();
+    clip.addLineListener(listener);
+    clip.open(audioInputStream);
+    try {
+      clip.start();
+      listener.waitUntilDone();
+    } finally {
+      clip.close();
+    }
+  } finally {
+    audioInputStream.close();
+  }
+}
+
+private void playClip2(byte[] bytes) throws IOException, UnsupportedAudioFileException, LineUnavailableException, InterruptedException
+{
+  class AudioListener implements LineListener {
+    private boolean done = false;
+    @Override public synchronized void update(LineEvent event) {
+      Type eventType = event.getType();
+      if (eventType == Type.STOP || eventType == Type.CLOSE) {
+        done = true;
+        notifyAll();
+      }
+    }
+    public synchronized void waitUntilDone() throws InterruptedException {
+      while (!done) { wait(); }
+    }
+  }
+  AudioListener listener = new AudioListener();
+    int sampleRate = 44100;
+    int sampleSize = 16;
+    int channels = 2;
+    boolean signed = true;
+    boolean bigEndian = false;
+
+    AudioFormat format = new AudioFormat(sampleRate, sampleSize, channels, signed, bigEndian);
+    log("Audio format: " + format);
+  DataLine.Info info;
+  Clip clip;
+      info = new DataLine.Info(Clip.class, format);
+      clip = (Clip) AudioSystem.getLine(info);
+      clip.addLineListener(listener);
+      clip.open(format, bytes, 0, bytes.length);
+    try {
+      clip.start();
+      listener.waitUntilDone();
+    } finally {
+      clip.close();
+    }
+}
+
+  private void playAudio3(byte[] bytes) {
+
+    log("Playing audio byte array of length " + bytes.length);
+    try {
 
     int sampleRate = 44100;
     int sampleSize = 16;
@@ -288,67 +396,75 @@ public class SoundClient {
     boolean bigEndian = false;
 
     AudioFormat format = new AudioFormat(sampleRate, sampleSize, channels, signed, bigEndian);
+    log("Audio format: " + format);
+      DataLine.Info info;
+      Clip clip;
+
+      info = new DataLine.Info(Clip.class, format);
+      clip = (Clip) AudioSystem.getLine(info);
+      clip.open(format, bytes, 0, bytes.length);
+      clip.start();
+      do {
+        Thread.sleep(1);
+      } while (clip.isActive());
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  private void playAudio2(byte[] bytes) {
+
+    log("Playing audio byte array of length " + bytes.length);
+    try {
+      //ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
+      ByteArrayInputStream bais = new ByteArrayInputStream(bytes, 0, bytes.length);
+      log("available: " + bais.available());
+
+      AudioInputStream stream; // input stream with format and length
+      AudioFormat format;
+      DataLine.Info info;
+      Clip clip;
+
+      stream = AudioSystem.getAudioInputStream(bais);
+      format = stream.getFormat();
+      info = new DataLine.Info(Clip.class, format);
+      clip = (Clip) AudioSystem.getLine(info);
+      clip.open(stream);
+      clip.start();
+      do {
+        Thread.sleep(1);
+      } while (clip.isActive());
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  private void playAudio(byte[] bytes) {
+
+    log("Playing audio byte array of length " + bytes.length);
+    int sampleRate = 44100;
+    int sampleSize = 16;
+    int channels = 2;
+    boolean signed = true;
+    boolean bigEndian = false;
+
+    AudioFormat format = new AudioFormat(sampleRate, sampleSize, channels, signed, bigEndian);
+    log("Audio format: " + format);
 
     try {
       DataLine.Info dataLineInfo = new DataLine.Info(SourceDataLine.class, format);
       SourceDataLine sourceDataLine = (SourceDataLine) AudioSystem.getLine(dataLineInfo);
+      log("Line info: " + sourceDataLine);
+      sourceDataLine.open(format);
+      FloatControl volumeControl = (FloatControl) sourceDataLine.getControl(FloatControl.Type.MASTER_GAIN);
+      volumeControl.setValue(6.0206f);
+      sourceDataLine.start();
       sourceDataLine.open(format);
       sourceDataLine.start();
       sourceDataLine.write(bytes, 0, bytes.length);
       sourceDataLine.drain();
       sourceDataLine.close();
     } catch (Exception e) { // todo: make exceptions more specific
-      e.printStackTrace();
-    }
-  }
-
-  //private void mcReceiveAudioBroadcast() { 
-  private byte[] mcReceiveAudioBroadcast() { 
-    log("Listening for multicast audio broadcast.");
-    DatagramPacket packet;  
-    ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
-    //byte[] result = new byte[1000000];
-    byte[] packetBytes = new byte[udpMaxPayload];
-
-    mcSetTimeout(1000);
-
-    int i = 0;
-    while(true) { 
-      packet = new DatagramPacket(packetBytes, packetBytes.length);
-      try { 
-        mcSocket.receive(packet);
-      } catch (SocketTimeoutException e) {
-        log("TIMEOUT"); 
-        break; // This is the normal course of events.
-      } catch (IOException e) {
-        e.printStackTrace();
-      }
-      byteStream.write(packetBytes, 0, packetBytes.length);
-      //System.arraycopy(packetBytes, 0, result, i, packetBytes.length); 
-      i += udpMaxPayload;
-    }
-    byte[] result = byteStream.toByteArray();
-
-    log("Bytes to play: " + result.length); 
-    return result;
-  }
-
-  private void mcReceiveString(int len) { 
-    byte[] buf = new byte[len];
-    DatagramPacket mcPacket = new DatagramPacket(buf, buf.length);
-    try { 
-      log("Listening for multicast");
-      mcSocket.receive(mcPacket);
-      log("Received: " + new String(buf));
-    } catch (IOException e) { 
-      e.printStackTrace();
-    }
-  }
-
-  private void mcSetTimeout(int ms) {
-    try {
-      mcSocket.setSoTimeout(ms);
-    } catch (SocketException e) {
       e.printStackTrace();
     }
   }

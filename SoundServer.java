@@ -18,11 +18,12 @@ public class SoundServer {
   private boolean isFirstClient;
 
   private static boolean fair = true;
-  private ReentrantReadWriteLock lock = new ReentrantReadWriteLock(fair);
+  private ReentrantReadWriteLock lock;
 
   // ServerThread "1" receives audio from sender client into the soundBytes array shared between the ServerThreads. ServerThread "1" (which handles the sender SoundClient) needs to lock it for writing before sending happens. Locking prevents the other ServerThreads from reading the array, if we use a ReentrantReadWriteLock(fair) lock, which should also guarantee that once the other ServerThreads have given up their (read) lock, and ServerThread "1" has been waiting the longest, it will get the lock and be able to write (again).
 
   private byte[] soundBytes = null; 
+  private ByteArrayOutputStream byteStream;
 
   public SoundServer() { 
     defaultTcpPort = 789;
@@ -30,6 +31,8 @@ public class SoundServer {
     nextTcpClientId = firstTcpClientId;
     nextUdpPort = firstUdpPort;
     isFirstClient = true;
+    lock = new ReentrantReadWriteLock(fair);
+    byteStream = new ByteArrayOutputStream();
   }
 
   private int nextTcpClientId() { 
@@ -50,7 +53,7 @@ public class SoundServer {
 
     Socket socket = serverSocket.accept();
     log("Connection with first client established. This client will be the sender.");
-    new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, soundBytes).start();
+    new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, byteStream).start();
 
     isFirstClient = false;
 
@@ -59,7 +62,7 @@ public class SoundServer {
     while(true) { 
       socket = serverSocket.accept();
       log("Connection with additional client established. This client will be a receiver.");
-      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, soundBytes).start();
+      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, byteStream).start();
     }
   }
 
