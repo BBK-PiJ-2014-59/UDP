@@ -2,11 +2,13 @@ import java.net.*;
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.Lock;
 
 import static util.SoundUtil.*;
 
 public class SoundServer { 
-  
+
   private static String programName = "SoundServer";
 
   private int defaultTcpPort;
@@ -26,6 +28,8 @@ public class SoundServer {
   private byte[] soundBytes = null; 
   private ByteArrayOutputStream byteStream;
 
+  private SharedFailoverInfo failoverInfo;
+
   public SoundServer() { 
     defaultTcpPort = 789;
     firstTcpClientId = 1;
@@ -34,6 +38,7 @@ public class SoundServer {
     isFirstClient = true;
     lock = new ReentrantReadWriteLock(fair);
     byteStream = new ByteArrayOutputStream();
+    failoverInfo = new SharedFailoverInfo(firstUdpPort);  
   }
 
   private int nextTcpClientId() { 
@@ -54,7 +59,7 @@ public class SoundServer {
 
     Socket socket = serverSocket.accept();
     log("Connection with first client established. This client will be the sender.");
-    new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, byteStream).start();
+    new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, byteStream, failoverInfo).start();
 
     isFirstClient = false;
 
@@ -63,7 +68,7 @@ public class SoundServer {
     while(true) { 
       socket = serverSocket.accept();
       log("Connection with additional client established. This client will be a receiver.");
-      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, byteStream).start();
+      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, byteStream, failoverInfo).start();
     }
   }
 

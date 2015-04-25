@@ -57,7 +57,9 @@ public class SoundServerThread extends Thread {
   private DatagramSocket udpSenderSocket;
   private InetAddress udpReceiverHost;
 
-  SoundServerThread(Socket s, int id, int port, boolean isFirst, ReentrantReadWriteLock lock, ByteArrayOutputStream byteStream) { 
+  private SharedFailoverInfo failoverInfo;
+
+  SoundServerThread(Socket s, int id, int port, boolean isFirst, ReentrantReadWriteLock lock, ByteArrayOutputStream byteStream, SharedFailoverInfo info) { 
     tcpSocket = s;
     tcpClientId = id; 
     udpPort = port;
@@ -66,6 +68,7 @@ public class SoundServerThread extends Thread {
     udpIsUp = false;
     this.lock = lock;
     this.byteStream = byteStream;
+    failoverInfo = info;
 
     log("Initialized to listen on UDP port " + udpPort);
   }
@@ -111,8 +114,8 @@ public class SoundServerThread extends Thread {
             if (reply == null) {
               log("Lost connection with sender client");
               lostConnection = true; 
-              // failOver();
-              // iShouldDie = true;
+              failOver();
+              iShouldDie = true;
               break;
             } else if (reply.equals("READY_TO_SEND"))
               udpReceiveAudioFromClient(); // write soundBytes
@@ -124,7 +127,6 @@ public class SoundServerThread extends Thread {
               //   break; 
               // } 
 
-              //playTest();
 
           } finally {
 
@@ -146,6 +148,10 @@ public class SoundServerThread extends Thread {
 
     if (clientRole == ClientRoles.RECEIVER) { 
       while(true) {
+        if (failoverInfo.isFailed() && udpPort == failoverInfo.getUdpPort()) { 
+          log("Taking over as sender handler thread. Changing client role to sender client.");
+          //failoverInfo.setNeedFailover(false);
+        }
         log("Waiting for read lock.");
         lock.readLock().lock(); // lock soundBytes so it can't be written by the ServerThread handling sender client.
         try {
@@ -171,6 +177,15 @@ public class SoundServerThread extends Thread {
   }
 
   private void failOver() {
+
+    log("Sender-handling thread needs to fail over.");
+
+    failoverInfo.setNeedFailover(true);
+    failoverInfo.incrementUdpPort();
+
+    while(failoverInfo.isFailed())
+      ;
+
   }
 
   private void udpSetUpSenderSocket() {
