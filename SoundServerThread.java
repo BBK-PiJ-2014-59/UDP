@@ -88,8 +88,8 @@ public class SoundServerThread extends Thread {
         soundBytes = new byte[getArrayLength()]; 
         log("Waiting for write lock.");
         lock.writeLock().lock(); // lock soundBytes so it can't be read by other ServerThreads.
-        log("Write lock obtained.");
         try {
+          log("Write lock obtained.");
           try {
             Thread.sleep(2000);
           } catch (InterruptedException e) { 
@@ -114,24 +114,28 @@ public class SoundServerThread extends Thread {
     }
 
     if (clientRole == ClientRoles.RECEIVER) { 
-      tcpWaitForMessage("READY_FOR_ARRAY_LENGTH"); 
-      log("Waiting for read lock.");
-      lock.readLock().lock(); // lock soundBytes so it can't be written by the ServerThread handling sender client.
-      log("Read lock obtained.");
-      //tcpSend(new Integer(getArrayLength()).toString());
-      log("byteStream.size(): " + byteStream.size());
-      tcpSend(new Integer(byteStream.size()).toString());
-      tcpSend("READY_FOR_UDP_PORT"); // race condition?
-      String reply = tcpListen(); // todo: check for null
-      int port = Integer.parseInt(reply);
-      log("Received receiver's UDP port: " + port);
-      udpSetUpSenderSocket();
-      tcpWaitForMessage("READY_TO_RECEIVE");  
-      //tcpSendArrayLength();
-      udpSendSoundBytesToClient(port);
-      lock.readLock().unlock(); 
-      log("Read lock released.");
-
+      while(true) {
+        log("Waiting for read lock.");
+        lock.readLock().lock(); // lock soundBytes so it can't be written by the ServerThread handling sender client.
+        try {
+          tcpWaitForMessage("READY_FOR_ARRAY_LENGTH"); 
+          log("Read lock obtained.");
+          //tcpSend(new Integer(getArrayLength()).toString());
+          log("byteStream.size(): " + byteStream.size());
+          tcpSend(new Integer(byteStream.size()).toString());
+          tcpSend("READY_FOR_UDP_PORT"); // race condition?
+          String reply = tcpListen(); // todo: check for null
+          int port = Integer.parseInt(reply);
+          log("Received receiver's UDP port: " + port);
+          udpSetUpSenderSocket();
+          tcpWaitForMessage("READY_TO_RECEIVE");  
+          //tcpSendArrayLength();
+          udpSendSoundBytesToClient(port);
+        } finally {
+          lock.readLock().unlock(); 
+          log("Read lock released.");
+        }       
+      }
     }
   }
 
