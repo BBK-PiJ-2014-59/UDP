@@ -11,7 +11,11 @@ public class SoundClient {
 
   private static String loggingName = "SoundClient";
 
-  private static String audioFilename = "Roland-JX-8P-Bell-C5.wav";
+  //private static String audioFilename = "Roland-JX-8P-Bell-C5.wav";
+  //private static String audioFilename = "Roland-GR-1-Trumpet-C5.wav";
+
+  private final String audioFilename;
+
   private String tcpHost;
   private int tcpPort;
 
@@ -72,92 +76,108 @@ public class SoundClient {
 
   private int arrayLength; // todo: change variable name?
 
-  public SoundClient() {
-    this(defaultHost, defaultPort);
+  public SoundClient(String audioFilename) {
+    this(defaultHost, defaultPort, audioFilename);
   }
 
-  public SoundClient(String host, int port) {
+  public SoundClient(String host, int port, String audioFilename) {
     tcpHost = host;
     tcpPort = port;
     id = defaultId;
     role = Role.NOT_SET;
     udpReceiverIsUp = false;
+    this.audioFilename = audioFilename;
   }
 
   public static void main(String[] args) { 
 
-    SoundClient soundClient = new SoundClient();  
+    String filename = null;
 
-    soundClient.connectTcp();
-    soundClient.setUpTcpIo();
-    soundClient.requestAndSetId();
-    soundClient.requestAndSetRole();
-    soundClient.requestAndSetUdpPort();
-    soundClient.setUpUdpSending();
+    if (args.length == 1) { 
+      filename = args[0];
+    } else { 
+      System.out.println("Usage: java " + loggingName + " <wav_filename>");
+      System.exit(0);
+    }
+
+    SoundClient soundClient = new SoundClient(filename);  
+    soundClient.launch();
+
+  }
+
+
+  private void launch() { 
+
+    connectTcp();
+    setUpTcpIo();
+    requestAndSetId();
+    requestAndSetRole();
+    requestAndSetUdpPort();
+    setUpUdpSending();
 
     // main loop:
 
     while(true) {  
 
-      if (soundClient.getRole() == Role.SENDER) { 
-        soundClient.readSoundFileIntoByteArray(audioFilename);
-        soundClient.tcpSendArrayLength();
+      if (getRole() == Role.SENDER) { 
+        readSoundFileIntoByteArray(audioFilename);
+        tcpSendArrayLength();
         int audioSendCount = 0;
         
         // sender loop:
 
         while(true) { 
           System.out.println();
-          soundClient.log("Audio send count: " + audioSendCount++);
-          String reply = soundClient.tcpWaitForMessage("READY_TO_RECEIVE");
+          log("Audio send count: " + audioSendCount++);
+          String reply = tcpWaitForMessage("READY_TO_RECEIVE");
           if (reply == null) {
-            soundClient.error("Lost connection with receiver on server thread.");
+            error("Lost connection with receiver on server thread.");
             //break;
             System.exit(0);
           }
-          soundClient.tcpSend("READY_TO_SEND");
+          tcpSend("READY_TO_SEND");
           try {
             Thread.sleep(1000); // todo: remove after testing?
           } catch (InterruptedException e) {
             e.printStackTrace();
           }
-          soundClient.udpSendSoundBytesToServerThread();
+          udpSendSoundBytesToServerThread();
         }
       }
 
-      else if (soundClient.getRole() == Role.RECEIVER) { 
-        soundClient.udpSetUpReceiverSocket();
+      else if (getRole() == Role.RECEIVER) { 
+        udpSetUpReceiverSocket();
 
         // receiver loop:
 
         while(true) {
 
           System.out.println();
-          soundClient.tcpSend("READY_FOR_ARRAY_LENGTH"); // todo: what if this is sent before ServerThread does tcpWaitForMessage("READY_FOR_ARRAY_LENGTH")? Not heard!!
-          String length = soundClient.tcpListen(); // todo: what if connection is broken and length is null? Add exception handling to tcpListen();
-          soundClient.log("Received array length: " + length);
-          soundClient.setArrayLength(Integer.parseInt(length)); 
+          tcpSend("READY_FOR_ARRAY_LENGTH"); // todo: what if this is sent before ServerThread does tcpWaitForMessage("READY_FOR_ARRAY_LENGTH")? Not heard!!
+          String length = tcpListen(); // todo: what if connection is broken and length is null? Add exception handling to tcpListen();
+          log("Received array length: " + length);
+          setArrayLength(Integer.parseInt(length)); 
 
-          if (soundClient.getArrayLength() == resetClient) { 
+          if (getArrayLength() == resetClient) { 
             // This means there is a failover situation.
             // Become a sender instead of a receiver.
-            soundClient.setRole(Role.SENDER);
-            soundClient.log("Role changing from RECEIVER to SENDER");
+            setRole(Role.SENDER);
+            log("Role changing from RECEIVER to SENDER");
             break;
           }
 
-          soundClient.soundBytes = new byte[soundClient.getArrayLength()];
-          soundClient.tcpWaitForMessage("READY_FOR_UDP_PORT");
-          soundClient.tcpSend(new Integer(soundClient.getUdpReceiverPort()).toString());
-          soundClient.tcpSend("READY_TO_RECEIVE"); 
-          soundClient.udpReceiveAudioFromSender();
-          soundClient.playAudio(soundClient.soundBytes); // rename
+          soundBytes = new byte[getArrayLength()];
+          tcpWaitForMessage("READY_FOR_UDP_PORT");
+          tcpSend(new Integer(getUdpReceiverPort()).toString());
+          tcpSend("READY_TO_RECEIVE"); 
+          udpReceiveAudioFromSender();
+          playAudio(soundBytes); // rename
 
         } // end of receiver loop
       } // end of receiver block
     } // end of main while loop 
-  }
 
+  }
 
   private int getUdpReceiverPort() {
     return udpReceiverSocket.getLocalPort();
@@ -375,19 +395,6 @@ public class SoundClient {
     }
   }
 
-  private void udpSendString(String msg) { 
-    log("Sending string via UDP: " + msg);
-    byte[] bytes = msg.getBytes();
-    DatagramPacket packet = new DatagramPacket(bytes, bytes.length, udpHost, udpPort);
-    if (packet == null)
-      log("packet null"); 
-    try { 
-      udpSocket.send(packet);
-    } catch (IOException e) { 
-      e.printStackTrace();
-    }
-  }
-
   private void setUpUdpSending() { 
     try { 
       udpSocket = new DatagramSocket();
@@ -400,7 +407,6 @@ public class SoundClient {
       e.printStackTrace();
     }
   }
-
 
 
   private void connectTcp() { 
