@@ -19,12 +19,6 @@ import java.util.regex.Matcher;
 import java.util.concurrent.locks.ReentrantReadWriteLock; 
 import java.util.concurrent.TimeUnit; 
 
-import javax.sound.sampled.AudioInputStream; 
-import javax.sound.sampled.AudioFormat; 
-import javax.sound.sampled.DataLine; 
-import javax.sound.sampled.Clip; 
-import javax.sound.sampled.AudioSystem; 
-
 import static util.SoundUtil.*;
 
 public class SoundServerThread extends Thread { 
@@ -462,7 +456,7 @@ public class SoundServerThread extends Thread {
           log("**** UDP TIMEOUT ****"); 
           break; // This is the normal course of events.
         } catch (IOException e) { 
-          e.printStackTrace(); 
+          e.printStackTrace();
         }
 
         byteArrayOutputStream.write(packetBytes, 0, packetBytes.length);
@@ -470,7 +464,6 @@ public class SoundServerThread extends Thread {
     }
 
         log("byteArrayOutputStream.size(): " + byteArrayOutputStream.size());
-        //log("byteNum: " + byteNum); 
 
     // get final packet, size being what ever is left after getting contant length packets.
 
@@ -483,7 +476,7 @@ public class SoundServerThread extends Thread {
       try {
         udpReceivingSocket.receive(packet);
       } catch (SocketTimeoutException e) {
-        e.printStackTrace();
+        log("Packet receive timeout");
       } catch (IOException e) { 
         e.printStackTrace(); 
       }

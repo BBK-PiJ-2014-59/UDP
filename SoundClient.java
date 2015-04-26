@@ -1,64 +1,146 @@
-import java.io.*;
-import java.nio.file.*;
-import java.net.*;
-import java.util.regex.*;
-import javax.sound.sampled.*;
+import java.io.BufferedReader;
+import java.io.PrintWriter;
+import java.io.InputStreamReader;
+import java.io.IOException;
+import java.io.ByteArrayInputStream;
+
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.Files;
+
+import java.net.Socket;
+import java.net.DatagramSocket;
+import java.net.DatagramPacket;
+import java.net.InetAddress;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.net.ConnectException;
+import java.net.UnknownHostException;
+
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.DataLine;
+import javax.sound.sampled.Clip;
+import javax.sound.sampled.AudioSystem;
+
 import javax.sound.sampled.LineEvent.Type;
 
 import static util.SoundUtil.*;
 
 public class SoundClient { 
 
+  /**
+    * Program's name as displayed in log messages.
+    */
   private static String loggingName = "SoundClient";
 
-  //private static String audioFilename = "Roland-JX-8P-Bell-C5.wav";
-  //private static String audioFilename = "Roland-GR-1-Trumpet-C5.wav";
-
+  /**
+    * Name of wav file for sender client to send audio of.
+    */
   private final String audioFilename;
 
-  private String tcpHost;
+  /**
+    * Hostname of SoundServer.
+    */
+  private String ipHost;
+
+  /**
+    * TCP port of SoundServer.
+    */
   private int tcpPort;
 
+  /**
+    * Spec didn't require multiple hosts, so client and server
+    * are both "localost".
+    */
   private static String defaultHost = "localhost";
-  private static int defaultPort = 789;
 
+  /**
+    * Default TCP port of SoundServer.
+    */
+  private final static int defaultPort = 789;
+
+  /**
+    * Unique client ID given by server used for eg logging.
+    */
   private int id; // todo: make same as thread.getId();
+
+  /**
+    * ID we have until given one by server.
+    */
   private static int defaultId = 0;
 
-  //private String role; // todo: use enum/check for valid role reply from server.
-  //private String role; // todo: use enum/check for valid role reply from server.
-
+  /**
+    * For receiving TCP signalling from server.
+    */
   private BufferedReader bufferedReader;
-  private PrintWriter printWriter;
-  private Socket sock;
+
+  /**
+    * For receiving TCP signalling from server.
+    */
   private InputStreamReader isr;
 
+  /**
+    * For sending TCP signalling to server.
+    */
+  private PrintWriter printWriter;
+
+  /**
+    * For TCP signalling with server.
+    */
+  private Socket sock;
+
+  /**
+    * Whether UDP has been set up, so we don't re-attempt.
+    */
   private boolean udpReceiverIsUp;
 
+  /**
+    * For receiving audio from server.
+    */
   private DatagramSocket udpReceiverSocket;
-  private int udpReceiverPort;
 
+  private int udpReceiverPort;
   private DatagramSocket udpSocket;
   private InetAddress udpHost;
   private int udpPort;
 
-  private MulticastSocket mcSocket;
-  private InetAddress mcGroup;
-  private static String mcAddress = "224.111.111.111";
-  private static int mcPort = 10000;
+  /**
+    * UDP guarantees delivery of 576 bytes/packet without having to rely on
+    * automatic splitting up and reassembling at the other end. Such reassembly
+    * fails if any packets are lost. As we are not dealing with lost packets, we need
+    * to stay below 576. 512 seemed to be common practice when working with
+    * this constraint.
+    */
+  private static final int udpMaxPayload = 512;
 
-  private static final int udpMaxPayload = 512; // Seems best practice not to exceeed this.
-
-  private static int resetClient = -1; // This needs to be the same on the client and server thread for failover purposes. 
+  /**
+    * Sent to receiver client to trigger it to change its role to sender during failover situation.
+    * This is done when receiver client is expecting an array length from its handling server thread.
+    * Client must be set to expect same value shown here.
+    */
+  private static int resetClient = -1;
   
+  /**
+    * Possible Roles we can take on. NOT_SET is before we are assigned a role by server.
+    */
   private enum Role {
     NOT_SET,
     SENDER,
     RECEIVER
   }
 
+  /**
+    * Determines whether we send or receive audio. Can change in a failover situation.
+    */
   private Role role;
 
+  /**
+    * Requests we need to send to server.
+    */
   private enum Request {
     ID,
     ROLE,
@@ -67,21 +149,34 @@ public class SoundClient {
     READY_TO_SEND
   }
 
+  /**
+    * Replies we may get.
+    */
   private enum Replies { 
     ACK_LENGTH
   }
 
-  byte[] soundBytesToSend; // if sender
-  byte[] soundBytes; // if receiver
+  /**
+    * Audio to be sent to server if we are sender.
+    */
+  private byte[] soundBytesToSend; 
 
-  private int arrayLength; // todo: change variable name?
+  /**
+    * Audio to be played if we're a receiver.
+    */
+  private byte[] soundBytes; 
+
+  /**
+    * Length of audio receive array.
+    */
+  private int receiveArrayLength; // todo: change variable name?
 
   public SoundClient(String audioFilename) {
     this(defaultHost, defaultPort, audioFilename);
   }
 
   public SoundClient(String host, int port, String audioFilename) {
-    tcpHost = host;
+    ipHost = host;
     tcpPort = port;
     id = defaultId;
     role = Role.NOT_SET;
@@ -106,46 +201,23 @@ public class SoundClient {
   }
 
 
+  /**
+    * Runs one of two loops: audio sender or receiver (which plays).
+    */
   private void launch() { 
 
-    connectTcp();
-    setUpTcpIo();
-    requestAndSetId();
-    requestAndSetRole();
-    requestAndSetUdpPort();
-    setUpUdpSending();
+    connectAndSetUp();
 
     // main loop:
 
     while(true) {  
 
       if (getRole() == Role.SENDER) { 
-        readSoundFileIntoByteArray(audioFilename);
-        tcpSendArrayLength();
-        int audioSendCount = 0;
-        
-        // sender loop:
-
-        while(true) { 
-          System.out.println();
-          log("Audio send count: " + audioSendCount++);
-          String reply = tcpWaitForMessage("READY_TO_RECEIVE");
-          if (reply == null) {
-            error("Lost connection with receiver on server thread.");
-            //break;
-            System.exit(0);
-          }
-          tcpSend("READY_TO_SEND");
-          try {
-            Thread.sleep(1000); // todo: remove after testing?
-          } catch (InterruptedException e) {
-            e.printStackTrace();
-          }
-          udpSendSoundBytesToServerThread();
-        }
+        loopSendingAudio();
       }
 
       else if (getRole() == Role.RECEIVER) { 
+
         udpSetUpReceiverSocket();
 
         // receiver loop:
@@ -174,9 +246,51 @@ public class SoundClient {
           playAudio(soundBytes); // rename
 
         } // end of receiver loop
-      } // end of receiver block
-    } // end of main while loop 
 
+      } // end of receiver block
+
+    } // end of launch's main while loop 
+
+  }
+
+  /**
+    * Loops audio to server
+    */
+  private void loopSendingAudio() {
+
+    readSoundFileIntoByteArray(audioFilename);
+    tcpSendArrayLength();
+    int audioSendCount = 0;
+    
+    while(true) { 
+      System.out.println();
+      log("Audio send count: " + audioSendCount++);
+      String reply = tcpWaitForMessage("READY_TO_RECEIVE");
+      if (reply == null) {
+        error("Lost connection with receiver on server thread.");
+        //break;
+        System.exit(0);
+      }
+      tcpSend("READY_TO_SEND");
+      try {
+        Thread.sleep(1000); // todo: remove after testing?
+      } catch (InterruptedException e) {
+        e.printStackTrace();
+      }
+      udpSendSoundBytesToServerThread();
+    }
+  }
+
+  /**
+    * Set up TCP and UDP links with server.
+    */
+  private void connectAndSetUp() {
+    connectTcp();
+    setUpTcpIo();
+    requestAndSetId();
+    requestAndSetRole();
+    requestAndSetUdpPort();
+    setUpUdpSending();
   }
 
   private int getUdpReceiverPort() {
@@ -192,6 +306,9 @@ public class SoundClient {
   }
 
   
+  /**
+    * Transfers audio from server for playing.
+    */
   private void udpReceiveAudioFromSender() {
     DatagramPacket packet;
     byte[] packetBytes = new byte[udpMaxPayload];
@@ -204,16 +321,11 @@ public class SoundClient {
       e.printStackTrace();
     }
 
-    //log("Receiving byte " + byteI);
-
-    // get packets with constant payload size (udpMaxPayload)
     int arrLen = getArrayLength();
     while (byteI < arrLen - udpMaxPayload) {
-        //log("Receiving byte " + byteI);
         packet = new DatagramPacket(packetBytes, packetBytes.length);
 
         try {
-          //udpSocket.receive(packet);
           udpReceiverSocket.receive(packet);
         } catch (SocketTimeoutException e) {
           log("**** UDP TIMEOUT ****");
@@ -233,36 +345,22 @@ public class SoundClient {
         }
 
         byteI += udpMaxPayload;
+    
     }
-
-    //udpSetTimeout(5000); // todo: remove because for testing only, ie so we have time to start client in terminal.
-
-    /*
-    // get final packet, size being what ever is left after getting contant length packets.
-    if (byteI < arrLen) {
-      int finLen = arrLen - byteI;
-      byte[] finBytes = new byte[finLen];
-      packet = new DatagramPacket(finBytes, finLen);
-
-      try {
-        udpReceiverSocket.receive(packet);
-      } catch (SocketTimeoutException e) {
-        //break; // This is the normal course of events.
-      } catch (IOException e) {
-        e.printStackTrace();
-      }
-
-      System.arraycopy(finBytes, 0, soundBytes, byteI, finLen);
-      byteI += finLen;
-    }
-    */
 
 
     log("Received final byte: " + byteI);
 
     udpSetTimeout(100);
+    
 
   }
+
+  /**
+    * Listen for a TCP message from server.
+    *
+    * @return message
+    */
 
   private String tcpListen() {
     String msg = null;
@@ -274,6 +372,13 @@ public class SoundClient {
     return msg;
   }
 
+  /**
+    * Wait for a message from server and reply.
+    *
+    * @param expected   expected message, for eg logging and checking.
+    * @param sendThis   message to reply with.
+    * @return           what was received.
+    */
   private String tcpExpectAndSend(String expected, String sendThis) {
     String request = null;
     log("Waiting for message from SoundServerThread: " + expected);
@@ -299,11 +404,11 @@ public class SoundClient {
   }
   
   private void setArrayLength(int len) {
-    arrayLength = len;
+    receiveArrayLength = len;
   }
 
   private int getArrayLength() {
-    return arrayLength;
+    return receiveArrayLength;
   }
 
 
@@ -326,11 +431,13 @@ public class SoundClient {
   }
 
 
+  /**
+    * Play audio received from server.
+    */
   private void playAudio(byte[] bytes) {
 
     log("Playing audio byte array of length " + bytes.length);
     try {
-      //ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
       ByteArrayInputStream bais = new ByteArrayInputStream(bytes, 0, bytes.length);
       log("available: " + bais.available());
 
@@ -353,6 +460,9 @@ public class SoundClient {
     }
   }
 
+  /**
+    * Send server length of audio array (prior to sending audio).
+    */
   private void tcpSendArrayLength() { 
     String request = Replies.ACK_LENGTH.toString() + " " + soundBytesToSend.length;
     String reply = tcpRequest(request);
@@ -361,10 +471,12 @@ public class SoundClient {
       log("Server thread says it's ready to receive audio of requested length.");
     else { 
       log("Unexpected reply when sending array length.");
-      // todo: handle problem (need to do this everwhere if there's time)
     }
   }
 
+  /**
+    * Prepare wav audio for sending to server.
+    */
   private void readSoundFileIntoByteArray(String filename) { 
     Path path = Paths.get(filename);
 
@@ -376,6 +488,9 @@ public class SoundClient {
     }
   }
 
+  /**
+    * Send audio via UDP.
+    */
   private void udpSendSoundBytesToServerThread() { 
 
     DatagramPacket packet;
@@ -415,7 +530,7 @@ public class SoundClient {
 
     log("Setting up TCP connection with server.");
     try { 
-      sock = new Socket(tcpHost, tcpPort);
+      sock = new Socket(ipHost, tcpPort);
     } catch (ConnectException e) { // Connection refused
       e.printStackTrace();
     } catch (UnknownHostException e) { // couldn't resolve name. 
@@ -478,7 +593,7 @@ public class SoundClient {
     }
   }
 
-  private void requestAndSetRole() {  // todo: DRY
+  private void requestAndSetRole() { 
     String request = "ROLE";
     String reply = tcpRequest(request);
 
@@ -498,7 +613,6 @@ public class SoundClient {
       }
     }
 
-    // todo: add exceptions (everywhere) for bad/no replies.
   }
 
   private String tcpRequest(String request) { 
@@ -549,7 +663,6 @@ public class SoundClient {
     logger(loggingName + "-" + getId(), msg);
   }
 
-  // only use this when we shouldn't have gotten somewhere:
   private void error(String msg) { 
     logger(loggingName + "-" + getId() + ": ERROR",  msg);
   }

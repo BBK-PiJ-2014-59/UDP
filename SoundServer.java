@@ -1,4 +1,10 @@
-import java.net.*;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.InetAddress;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -11,45 +17,81 @@ public class SoundServer {
 
   private static String programName = "SoundServer";
 
-  private int defaultTcpPort;
+  private final int defaultTcpPort;
   private ServerSocket serverSocket;
-  private final int firstTcpClientId;
-  private int nextTcpClientId;
+
+  /**
+    * First unique ID a server thread will give to a connecting client.
+    */
+  private final int firstClientId;
+
+  /**
+    * Next unique ID a server thread will give to a connecting client.
+    */
+  private int nextClientId;
+
+  /**
+    * UDP listener port of first server thread.
+    */
   private final static int firstUdpPort = 42001;
+
+  /**
+    * UDP listener port of next server thread.
+    */
   private int nextUdpPort;
+
+  /**
+    * Whether client connecting to server thread was first (ie sender client).
+    */
   private boolean isFirstClient;
 
-  private static boolean fair = true;
-  //private static boolean fair = false;
+
+  /**
+    * This the lock shared between the server threads which keeps audio from being written as it's read.
+    */
   private ReentrantReadWriteLock lock;
 
-  // ServerThread "1" receives audio from sender client into the soundBytes array shared between the ServerThreads. ServerThread "1" (which handles the sender SoundClient) needs to lock it for writing before sending happens. Locking prevents the other ServerThreads from reading the array, if we use a ReentrantReadWriteLock(fair) lock, which should also guarantee that once the other ServerThreads have given up their (read) lock, and ServerThread "1" has been waiting the longest, it will get the lock and be able to write (again).
-
-  private byte[] soundBytes = null; 
+  /**
+    * Storage for audio, shared between server threads, for each receiving into or sending out of.
+    */
   private ByteArrayOutputStream byteStream;
 
+  /**
+    * Info shared between threads for managing failover in the event that sender client dies.
+    */
   private SharedFailoverInfo failoverInfo;
 
   public SoundServer() { 
     defaultTcpPort = 789;
-    firstTcpClientId = 1;
-    nextTcpClientId = firstTcpClientId;
+    firstClientId = 1;
+    nextClientId = firstClientId;
     nextUdpPort = firstUdpPort;
     isFirstClient = true;
-    lock = new ReentrantReadWriteLock(fair);
+    lock = new ReentrantReadWriteLock(true);  // 'true' means lock should go to waiting 
+                                              // writer when all readers have given up their lock
     byteStream = new ByteArrayOutputStream();
     failoverInfo = new SharedFailoverInfo(firstUdpPort);  
   }
 
-  private int nextTcpClientId() { 
-    return nextTcpClientId++; 
+  /**
+    * @return next unique ID to be given to a thread, which it will give its client. 
+    */
+  private int nextClientId() { 
+    return nextClientId++; 
   }
 
+  /**
+    * @return next unique UDP port to give a thread. 
+    */
   private int nextUdpPort() { 
     return nextUdpPort++; 
   }
 
-  void start() throws IOException { 
+  /**
+    * Launches server, which sets up a thread to handle each client.
+    * @throws IOException on socket setup failure.  
+    */
+  public void launch() throws IOException { 
     log("Starting SoundServer");
     log("Creating TCP socket.");
     serverSocket = new ServerSocket(defaultTcpPort); 
@@ -59,7 +101,7 @@ public class SoundServer {
 
     Socket socket = serverSocket.accept();
     log("Connection with first client established. This client will be the sender.");
-    new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, byteStream, failoverInfo).start();
+    new SoundServerThread(socket, nextClientId(), nextUdpPort(), isFirstClient, lock, byteStream, failoverInfo).start();
 
     isFirstClient = false;
 
@@ -68,7 +110,7 @@ public class SoundServer {
     while(true) { 
       socket = serverSocket.accept();
       log("Connection with additional client established. This client will be a receiver.");
-      new SoundServerThread(socket, nextTcpClientId(), nextUdpPort(), isFirstClient, lock, byteStream, failoverInfo).start();
+      new SoundServerThread(socket, nextClientId(), nextUdpPort(), isFirstClient, lock, byteStream, failoverInfo).start();
     }
   }
 
@@ -79,7 +121,7 @@ public class SoundServer {
   public static void main(String[] args) { 
     SoundServer soundServer = new SoundServer();
     try { 
-      soundServer.start();
+      soundServer.launch();
     } catch (IOException e) { 
       e.printStackTrace();
     }
