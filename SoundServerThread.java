@@ -176,15 +176,28 @@ public class SoundServerThread extends Thread {
     log("Initialized to listen on UDP port " + udpPort);
   }
 
+  /**
+    * Contains the two main loops:
+    * One for sender-client handling (SCH) and another receiver-client handling (RCH). 
+    */
   public void run() { 
-    tcpSetUpIo();
-    tcpExpectAndSend(ClientRequests.ID.toString(), clientId.toString());
-    tcpExpectAndSend(ClientRequests.ROLE.toString(), clientRole.toString());
-    tcpExpectAndSend(ClientRequests.UDP_PORT.toString(), udpPort.toString());
 
-    boolean takingOverHandlingSender = false;
+    setUpClient();
 
-    while(true) { // main loop 
+    boolean takingOverHandlingSender = false; // During failover situation 
+                                              // this tells thread if it 
+                                              // should change role from 
+                                              // receiver-handler to sender handler 
+    ///////////////////////////////
+    //                          //
+    // main server thread loop // 
+    //                        //
+    ///////////////////////////
+
+    while(true) {
+
+
+      // ******** Receiver-client handler block *********
 
       if (clientRole == ClientRoles.RECEIVER) { 
 
@@ -193,22 +206,22 @@ public class SoundServerThread extends Thread {
 
         while(true) {
 
-          // Check whether we are supposed to take over as sender-client handler thread (SCHT) ie because the current SCHT said there was problem with its sender client.
+          // First check whether we are supposed to take over as sender-client handler 
+          // thread (SCHT) ie because the current SCHT said there was problem with its sender client.
 
           log("failoverInfo.isFailed(): " + failoverInfo.isFailed() + " failoverInfo.getUdpPort(): " + failoverInfo.getUdpPort());
           if (failoverInfo.isFailed() && udpPort == failoverInfo.getUdpPort()) { 
             log("Taking over as sender handler thread. Changing client role to sender client.");
-            //failoverInfo.setNeedFailover(false);
             clientRole = ClientRoles.SENDER; 
             takingOverHandlingSender = true;
             break;
           }
 
-          int timeout = 10;
+          int timeout = 10; // In seconds - causes lock attempt to timeout during failover.
 
           try { 
             log("Waiting for read lock.");
-            readLocked = rwLock.readLock().tryLock(timeout, TimeUnit.SECONDS); // lock soundBytes so it can't be written by the ServerThread handling sender client.
+            readLocked = rwLock.readLock().tryLock(timeout, TimeUnit.SECONDS); // Has to be able to time out here during failover. 
 
             if (readLocked)
               log("Read lock obtained.");
@@ -219,21 +232,12 @@ public class SoundServerThread extends Thread {
 
           } catch (InterruptedException e) { 
             e.printStackTrace();
-            //continue;
           }
 
           try {
-            tcpWaitForMessage("READY_FOR_ARRAY_LENGTH"); 
-            log("byteArrayOutputStream.size(): " + byteArrayOutputStream.size());
-            tcpSend(new Integer(byteArrayOutputStream.size()).toString());
-            tcpSend("READY_FOR_UDP_PORT"); // race condition?
-            String reply = tcpListen(); // todo: check for null
-            int port = Integer.parseInt(reply);
-            log("Received receiver's UDP port: " + port);
-            udpSetUpSenderSocket();
-            tcpWaitForMessage("READY_TO_RECEIVE");  
-            //tcpSendArrayLength();
-            udpSendSoundBytesToClient(port);
+
+            sendAudio();
+
           } finally {
             if (readLocked) { 
               rwLock.readLock().unlock(); 
@@ -246,7 +250,9 @@ public class SoundServerThread extends Thread {
       } // end of if block for receiver-client handler
  
 
-      // Sender-client handler block 
+
+
+      // ******** Sender-client handler block *********
 
       if (clientRole == ClientRoles.SENDER) { 
 
@@ -258,7 +264,7 @@ public class SoundServerThread extends Thread {
           tcpExpectAndSend("READY_FOR_ARRAY_LENGTH", new Integer(resetClient).toString());  
         }
 
-        udpSetUpSocket();
+        udpSetUpReceivingSocket();
         tcpExpectAndSetArrayLength();
         int audioReceiveCount = 0;
         boolean lostConnection = false;
@@ -271,7 +277,7 @@ public class SoundServerThread extends Thread {
           System.out.println();
           log("Audio receive count: " + audioReceiveCount++);
           log("Waiting for write lock.");
-          rwLock.writeLock().lock(); // lock soundBytes so it can't be read by other ServerThreads.
+          rwLock.writeLock().lock(); 
 
           try {
 
@@ -285,8 +291,6 @@ public class SoundServerThread extends Thread {
 
             tcpSend("READY_TO_RECEIVE");
             String reply = tcpListen();
-            //String reply = tcpListenInTimeoutLoop();
-            //if (reply == "READY_TO_SEND")
 
             if (reply == null) {
               log("Lost connection with sender client");
@@ -294,7 +298,6 @@ public class SoundServerThread extends Thread {
               log("Releasing write lock so a new sender handling thread can take over.");
               rwLock.writeLock().unlock(); // unlock soundBytes so it can be read by thread we're failing over to. 
               failOver();
-              //iShouldDie = true;
               break;
             } else if (reply.equals("READY_TO_SEND"))
               udpReceiveAudioFromClient(); // write soundBytes
@@ -315,7 +318,39 @@ public class SoundServerThread extends Thread {
   } // end of run()
 
 
+  /**
+    * Set up communication with client for later data transfer
+    */
+  private void setUpClient() { 
 
+    tcpSetUpIo();
+    tcpExpectAndSend(ClientRequests.ID.toString(), clientId.toString());
+    tcpExpectAndSend(ClientRequests.ROLE.toString(), clientRole.toString());
+    tcpExpectAndSend(ClientRequests.UDP_PORT.toString(), udpPort.toString());
+
+  }
+
+  /**
+    * Negotiate and carry out transfer of audio to client
+    */
+  private void sendAudio() { 
+
+    tcpWaitForMessage("READY_FOR_ARRAY_LENGTH"); // First message to expect from client. 
+    log("byteArrayOutputStream.size(): " + byteArrayOutputStream.size());
+    tcpSend(new Integer(byteArrayOutputStream.size()).toString());
+    tcpSend("READY_FOR_UDP_PORT");
+    String reply = tcpListen(); // todo: check for null (here and elsewhere!).
+    int port = Integer.parseInt(reply);
+    log("Received receiver's UDP port: " + port);
+    udpSetUpSenderSocket();
+    tcpWaitForMessage("READY_TO_RECEIVE");  
+    udpSendSoundBytesToClient(port);
+
+  }
+
+  /**
+    * Update object shared between threads for managing failover so that another thread takes over as sender-client handler.
+    */
   private void failOver() {
 
     log("Sender-handling thread needs to fail over.");
@@ -323,11 +358,11 @@ public class SoundServerThread extends Thread {
     failoverInfo.setNeedFailover(true);
     failoverInfo.incrementUdpPort();
 
-    //while(failoverInfo.isFailed())
-    //  ;
-
   }
 
+  /**
+    * Set up UDP sending.
+    */
   private void udpSetUpSenderSocket() {
     try {
       log("Setting up UDP sender socket.");
@@ -343,34 +378,9 @@ public class SoundServerThread extends Thread {
   }
 
 
-  private void playTest() {
-    log("Play test.");
-
-    try {
-      //ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
-      ByteArrayInputStream bais = new ByteArrayInputStream(byteArrayOutputStream.toByteArray());
-      log("available: " + bais.available());
-
-      AudioInputStream stream; // input stream with format and length
-      AudioFormat format;
-      DataLine.Info info;
-      Clip clip;
-
-      stream = AudioSystem.getAudioInputStream(bais);
-      format = stream.getFormat();
-      info = new DataLine.Info(Clip.class, format);
-      clip = (Clip) AudioSystem.getLine(info);
-      clip.open(stream);
-      clip.start();
-      do {
-        Thread.sleep(1);
-      } while (clip.isActive());
-    } catch (Exception e) {
-      e.printStackTrace();
-    }
-
-  }
-
+  /**
+    * Send audio to receiver client.
+    */
   private void udpSendSoundBytesToClient(int clientUdpPort) {
 
     DatagramPacket packet;
@@ -394,25 +404,13 @@ public class SoundServerThread extends Thread {
     }
   }
 
-
-  private String tcpRequest(String request) {
-    String reply = null;
-    if (printWriter != null) {
-      log("Requesting " + request + " from server.");
-      printWriter.println(request);
-      try {
-        reply = bufferedReader.readLine();
-      } catch (IOException e) {
-        e.printStackTrace();
-      }
-    } else {
-      log("Can't request " + request + " - no IO stream set up with server.");
-    }
-    return reply;
-  }
-
-
-  private String tcpWaitForMessage(String message) { // todo: add checking to this. Did we get what we expected?
+  /**
+    * Displays the message it's TCP waiting for from client
+    * and returns the message it actually received.
+    * 
+    * @return message received.
+    */
+  private String tcpWaitForMessage(String message) { 
     String received = null;
     log("Waiting for TCP message: " + message);
     try {
@@ -424,7 +422,10 @@ public class SoundServerThread extends Thread {
     return received;
   }
 
-  private void udpSetTimeout(int ms) { 
+  /**
+    * Sets timeout on UDP socket for receiving audio packets from sender client
+    */
+  private void udpSetReceivingTimeout(int ms) { 
     try { 
       udpReceivingSocket.setSoTimeout(ms);
     } catch (SocketException e) { 
@@ -432,33 +433,27 @@ public class SoundServerThread extends Thread {
     }
   }
 
+  /**
+    * Receive audio from sender client via UDP and store in object shared by
+    * receiver-handling threads
+    */
   private void udpReceiveAudioFromClient() { 
     DatagramPacket packet;
     byte[] packetBytes = new byte[udpMaxPayload];
-    
   
-    udpSetTimeout(1000);
+    udpSetReceivingTimeout(1000);
 
     byteArrayOutputStream.reset(); // clear it, otherwise we're just appending.
 
 
-    // get packets with constant payload size (udpMaxPayload) 
-    int arrLen = getAudioReceivedArrayLength();
-    int i = 0;
-    log("Receiving byte " + i);
-    log("Array length: " + arrLen);
-    /*
-    try { 
-      log("UDP buf size: " + udpReceivingSocket.getReceiveBufferSize());
-      udpReceivingSocket.setReceiveBufferSize(udpReceivingSocket.getReceiveBufferSize()*2); // not helping
-      log("UDP buf size: " + udpReceivingSocket.getReceiveBufferSize());
-    } catch (SocketException e) { 
-      e.printStackTrace();
-    }
-    */
+    // First get packets with constant payload size (udpMaxPayload) 
 
-    while (i < arrLen - udpMaxPayload) {
-        //log("i: " + i); 
+    int arrLen = getAudioReceivedArrayLength();
+    int byteNum = 0;
+    log("Receiving byte " + byteNum);
+    log("Array length: " + arrLen);
+
+    while (byteNum < arrLen - udpMaxPayload) {
         packet = new DatagramPacket(packetBytes, packetBytes.length);
 
         try {
@@ -471,18 +466,16 @@ public class SoundServerThread extends Thread {
         }
 
         byteArrayOutputStream.write(packetBytes, 0, packetBytes.length);
-        //log("byteArrayOutputStream.size(): " + byteArrayOutputStream.size());
-        i += udpMaxPayload;
+        byteNum += udpMaxPayload;
     }
 
         log("byteArrayOutputStream.size(): " + byteArrayOutputStream.size());
-        log("i: " + i); 
-    //udpSetTimeout(5000); // todo: remove because for testing only, ie so we have time to start client in terminal.
+        //log("byteNum: " + byteNum); 
 
-/*
     // get final packet, size being what ever is left after getting contant length packets.
-    if (i < arrLen) { 
-      int finLen = arrLen - i;
+
+    if (byteNum < arrLen) { 
+      int finLen = arrLen - byteNum;
       log("Last packet length: " + finLen);
       byte[] finBytes = new byte[finLen];
       packet = new DatagramPacket(finBytes, finLen);
@@ -490,39 +483,27 @@ public class SoundServerThread extends Thread {
       try {
         udpReceivingSocket.receive(packet);
       } catch (SocketTimeoutException e) {
-        //break; // This is the normal course of events.
+        e.printStackTrace();
       } catch (IOException e) { 
         e.printStackTrace(); 
       }
 
-      //System.arraycopy(finBytes, 0, soundBytes, i, finLen);
       byteArrayOutputStream.write(finBytes, 0, finBytes.length);
-      i += finLen;
+      byteNum += finLen;
     }
-*/
 
-
-    log("Received final byte: " + i);
+    log("Received final byte: " + byteNum);
 
     log("byteArrayOutputStream.size(): " + byteArrayOutputStream.size());
 
-    udpSetTimeout(100); 
+    udpSetReceivingTimeout(100); 
 
   }
 
 
-  private void udpReceiveString() { // max length of udpMaxPayload - just for testing at this point
-
-    byte[] bytes = new byte[udpMaxPayload];
-    DatagramPacket udpPacket = new DatagramPacket(bytes, bytes.length); 
-    try { 
-      udpReceivingSocket.receive(udpPacket);
-    } catch (IOException e) { 
-      e.printStackTrace();
-    }
-    log("Received string: " + new String(udpPacket.getData()));
-  }
-
+  /**
+    * Set up TCP signalling with client.
+    */
   private void tcpSetUpIo() {
     log("Setting up TCP IO stream with client.");
     try {
@@ -534,6 +515,9 @@ public class SoundServerThread extends Thread {
     }
   }
 
+  /**
+    * Gets audio array length from sender client and sets it locally.
+    */
   private void tcpExpectAndSetArrayLength() { 
     String message = tcpExpectAndSend(ClientRequests.ACK_LENGTH.toString(), Replies.ACK_LENGTH.toString()); // todo: check length ok before ack?
     if (message != null) { 
@@ -547,14 +531,31 @@ public class SoundServerThread extends Thread {
     }
   }
 
+  /**
+    * Sets local audio receiver array length.
+    *
+    * @param  length of local audio receiver array.
+    */
   private void setAudioReceivedArrayLength(int len) { 
     receivedAudioArrayLength = len; 
   }
 
+  /**
+    * Returns local audio receiver array length.
+    * 
+    * @return local audio receiver array length.
+    */
   private int getAudioReceivedArrayLength() { 
     return receivedAudioArrayLength; 
   }
 
+  /**
+    * Wait for a message from client and reply.
+    *
+    * @param expected   expected message, for eg logging and checking.
+    * @param sendThis   message to reply with. 
+    * @return           what was received. 
+    */
   private String tcpExpectAndSend(String expected, String sendThis) { 
     String message = null;
     log("Waiting for message: " + expected);
@@ -574,11 +575,21 @@ public class SoundServerThread extends Thread {
     return message; 
   }
 
+  /**
+    * Send a String via TCP to client.
+    * 
+    * @param message to send
+    */
   private void tcpSend(String message) { 
     log("Sending TCP message: " + message);
     printWriter.println(message);
   }
 
+  /**
+    * Listen for a TCP message from client.
+    *
+    * @return message
+    */
   private String tcpListen() { 
     String msg = null;
     try {
@@ -589,24 +600,10 @@ public class SoundServerThread extends Thread {
     return msg;
   }
 
-  private String tcpListenInTimeoutLoop() { 
-    String msg = null;
-    int to = 0;
-    try { 
-      to = tcpSocket.getSoTimeout();
-    } catch (SocketException e) { 
-      e.printStackTrace();
-    }
-    log("TCP timeout: " + to); 
-    try {
-      msg = bufferedReader.readLine();
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
-    return msg;
-  }
-
-  private void udpSetUpSocket() {
+  /**
+    * Set up to receive UDP packets from client.
+    */
+  private void udpSetUpReceivingSocket() {
     if (!udpIsUp) { 
       try {
         log("Instantiating UDP datagram socket.");
@@ -618,11 +615,17 @@ public class SoundServerThread extends Thread {
     }
   }
 
+  /**
+    * For logging (normal) messages to the console. Relies on logger from "util.SoundUtil.*" import.
+    */
   private void log(String msg) {
     logger(loggingName + "-" + getId(), msg);
   }
 
-  private void error(String msg) { // only use this when we shouldn't have gotten somewhere.
+  /**
+    * For logging errors to the console. Relies on logger from "util.SoundUtil.*" import.
+    */
+  private void error(String msg) { 
     logger(loggingName + "-" + getId() + ": ERROR",  msg);
   }
 
