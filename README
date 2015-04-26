@@ -1,0 +1,77 @@
+This README covers:
+
+1. How this SoundClient-SoundServer system works. 
+
+2. How to run it.
+
+3. How it was developed.
+
+
+** 1. How it works **
+
+There are three parts: SoundServer, SoundServerThread, and SoundClient. First, SoundServer is started. Then multiple SoundClients are started, each with a wav file as its only command line argument. The server and all clients must run on the same machine (which seemed to be fine according to the spec). When the SoundServer detects a new client it starts a SoundServerThread to be the client's handler. If it's the first client, the handler tells it to be an audio sender. The client then starts looping audio to its handler. The other threads then forward this audio to their own (receiver) clients. If the sender client dies, its handler starts a failover to the handler of the subsequently connecting client, which then takes over as sender. 
+
+
+** 2. How to run it **
+
+About the computer where this ran "successfully":
+
+$ java -version
+java version "1.8.0_45"
+Java(TM) SE Runtime Environment (build 1.8.0_45-b14)
+Java HotSpot(TM) 64-Bit Server VM (build 25.45-b02, mixed mode)
+
+$ javac -version
+javac 1.8.0_45
+
+$ cat /etc/issue
+Ubuntu 14.04.2 LTS \n \l
+
+** Instructions **
+
+There are three source files which must all be in the same folder: SoundServer.java, SoundServerThread.java, and SoundClient.java. Also in that folder should be a subfolder called 'util', which contains, the fourth file: SoundUtil.java. 
+
+Known problems: The audio is pretty dodgy. It gets cut off and distorted. Failover can take several loops before the new sender client finally kicks in and you start hearing it.
+
+A. Simple example (no failover):
+
+Step 1. In terminal window 1, start the server: 
+
+  $ javac SoundServer.java && sudo java SoundServer
+
+Step 2. In terminal window 2, download a wav file (a bell sound) I used and start the first client with it:
+
+  $ wget http://freewavesamples.com/files/Roland-JX-8P-Bell-C5.wav
+  $ javac SoundClient.java && java SoundClient Roland-JX-8P-Bell-C5.wav 
+
+Step 3. In terminal window 3, download another wav file I used (a trumpet, which won't be played in this example, but will in the next) and start the second client with it:
+
+  $ wget http://freewavesamples.com/files/Roland-GR-1-Trumpet-C5.wav
+  $ java SoundClient Roland-GR-1-Trumpet-C5.wav
+
+You should start to hear a bell ringing in a loop after a few seconds. 
+
+
+B. An example with one failover:
+
+Continuing where we left off in the previous example...
+
+Step 4. In terminal window 4, download a third wav file I used (a clarinet, which won't be played in this example, but will in the next) and start the third client with it:
+
+  $ wget http://freewavesamples.com/files/Roland-GR-1-Clarinet-C5.wav
+  $ java SoundClient Roland-GR-1-Trumpet-C5.wav
+
+Step 5. Kill the first client (running in terminal window 2). After a few loops and some jittering and lots of messages on the screen, the second client should take over sending, and the third client should get its audio and you should hear a looping  trumpet.
+
+C. An example with more failovers: 
+
+Get one client running as the sender, as above, and then get three more clients each receiving and playing in their own, respective, terminal windows, starting them each with a different wav file (the fourth client can be given the one the first one got). The sound will be bad when they're all playing at the same time but you should hear distinguish between them a bit. Kill the sender client and wait for client 2 to kick in as the new sender and client 3 to start playing the file client 2 started with. Then kill client 2 and client 3 should take over, leaving client 4 playing the file client 3 started with. And so on and so forth...
+
+ 
+
+** 3. How it was developed **
+
+It was developed using vim and bash on ubuntu 14.04.
+
+I started out with TDD and then abandoned it as it was too slow and I realized I couldn't test a client-server setup without teaching myself some fairly advanced mocking techniques, for which there wasn't time. The project was so demanding that I had to leave testing until the end and, in the end, I ran out of time. Granted, there are many tests - and many defensive programming techniques - I could have put in place, even considering the client-server nature of it, but there wasn't time for those either. That said, I've learned a tremendous amount through trial and error getting the client and server talking and the threads working concurrently, and will hopefully do something related for my second year project.
+
