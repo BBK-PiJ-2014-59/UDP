@@ -7,7 +7,6 @@ import javax.sound.sampled.*; // for testing only
 import java.util.concurrent.TimeUnit; 
 
 
-
 import static util.SoundUtil.*;
 
 public class SoundServerThread extends Thread { 
@@ -44,11 +43,6 @@ public class SoundServerThread extends Thread {
   private enum Replies { 
     ACK_LENGTH
   }
-
-  private MulticastSocket mcSocket; 
-  private InetAddress mcGroup;
-  private static String mcAddress = "224.111.111.111";
-  private static int mcPort = 10000;
 
   private static int udpMaxPayload = 512;
   private byte[] soundBytes = null;
@@ -160,7 +154,6 @@ public class SoundServerThread extends Thread {
         if (takingOverHandlingSender) { 
           log("Notifying client it needs to be sender now.");
           tcpExpectAndSend("READY_FOR_ARRAY_LENGTH", new Integer(resetClient).toString());  
-          
         }
 
         udpSetUpSocket();
@@ -168,71 +161,60 @@ public class SoundServerThread extends Thread {
         int audioReceiveCount = 0;
         boolean lostConnection = false;
         boolean iShouldDie = false;
-        try {
+          
+        // sender-handling loop
 
-          while(true) {
+        while(true) { 
+          
+          System.out.println();
+          log("Audio receive count: " + audioReceiveCount++);
+          log("Initializing sound storage array of length " + getArrayLength());
+          soundBytes = new byte[getArrayLength()]; 
+          log("Waiting for write lock.");
+          lock.writeLock().lock(); // lock soundBytes so it can't be read by other ServerThreads.
 
-            System.out.println();
-            log("Audio receive count: " + audioReceiveCount++);
-            log("Initializing sound storage array of length " + getArrayLength());
-            soundBytes = new byte[getArrayLength()]; 
-            log("Waiting for write lock.");
-            lock.writeLock().lock(); // lock soundBytes so it can't be read by other ServerThreads.
+          try {
+
+            log("Write lock obtained.");
 
             try {
+              Thread.sleep(2000);
+            } catch (InterruptedException e) { 
+              e.printStackTrace();
+            }
 
-              log("Write lock obtained.");
+            tcpSend("READY_TO_RECEIVE");
+            String reply = tcpListen();
+            //String reply = tcpListenInTimeoutLoop();
+            //if (reply == "READY_TO_SEND")
 
-              try {
-                Thread.sleep(2000);
-              } catch (InterruptedException e) { 
-                e.printStackTrace();
-              }
+            if (reply == null) {
+              log("Lost connection with sender client");
+              lostConnection = true; 
+              log("Releasing write lock so a new sender handling thread can take over.");
+              lock.writeLock().unlock(); // unlock soundBytes so it can be read by thread we're failing over to. 
+              failOver();
+              //iShouldDie = true;
+              break;
+            } else if (reply.equals("READY_TO_SEND"))
+              udpReceiveAudioFromClient(); // write soundBytes
 
-              tcpSend("READY_TO_RECEIVE");
-              String reply = tcpListen();
-              //String reply = tcpListenInTimeoutLoop();
-              //if (reply == "READY_TO_SEND")
+          } finally {
 
-              if (reply == null) {
-                log("Lost connection with sender client");
-                lostConnection = true; 
-                failOver();
-                iShouldDie = true;
-                break;
-              } else if (reply.equals("READY_TO_SEND"))
-                udpReceiveAudioFromClient(); // write soundBytes
+            lock.writeLock().unlock(); // unlock soundBytes.
+            log("Write lock released.");
 
-                // boolean successful = udpReceiveAudioFromClient(); // write soundBytes
-                // if (!successful) {
-                //   failOver();
-                //   iShouldDie = true;
-                //   break; 
-                // } 
+          }       
 
-
-            } finally {
-
-              lock.writeLock().unlock(); // unlock soundBytes.
-              log("Write lock released.");
-
-            }       
-
-          } // end of while loop for handling sender client
-
-          if (iShouldDie) { 
-            System.exit(0);
-          }
-
-        } finally { 
-          System.exit(0);
-        }
+        } // end of while loop for sender-client handler
         
-      } // end of if loop for sender-client handler
+      } // end of if block for sender-client handler
 
-    } // end of main loop
+    } // end of run() loop
 
-  }
+  } // end of run()
+
+
 
   private void failOver() {
 
@@ -241,8 +223,8 @@ public class SoundServerThread extends Thread {
     failoverInfo.setNeedFailover(true);
     failoverInfo.incrementUdpPort();
 
-    while(failoverInfo.isFailed())
-      ;
+    //while(failoverInfo.isFailed())
+    //  ;
 
   }
 
@@ -475,18 +457,6 @@ public class SoundServerThread extends Thread {
       e.printStackTrace();
     }
     log("Received string: " + new String(udpPacket.getData()));
-  }
-
-  private void mcSetUpBroadcaster() {
-    log("Setting up multicast broadcaster.");
-    try { 
-      mcSocket = new MulticastSocket(); 
-      mcGroup = InetAddress.getByName(mcAddress);
-    } catch (UnknownHostException e) { 
-      e.printStackTrace();
-    } catch (IOException e) { 
-      e.printStackTrace();
-    }
   }
 
   private void tcpSetUpIo() {
