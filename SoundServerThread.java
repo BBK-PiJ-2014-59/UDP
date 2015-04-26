@@ -61,6 +61,7 @@ public class SoundServerThread extends Thread {
   private InetAddress udpReceiverHost;
 
   private SharedFailoverInfo failoverInfo;
+  private static int resetClient = -1; // This needs to be the same on the client for failover purposes.
 
   SoundServerThread(Socket s, int id, int port, boolean isFirst, ReentrantReadWriteLock lock, ByteArrayOutputStream byteStream, SharedFailoverInfo info) { 
     tcpSocket = s;
@@ -82,124 +83,154 @@ public class SoundServerThread extends Thread {
     tcpExpectAndSend(ClientRequests.ROLE.toString(), clientRole.toString());
     tcpExpectAndSend(ClientRequests.UDP_PORT.toString(), udpPort.toString());
 
-    if (clientRole == ClientRoles.SENDER) { 
-      udpSetUpSocket();
-      tcpExpectAndSetArrayLength();
-      int audioReceiveCount = 0;
-      boolean lostConnection = false;
-      boolean iShouldDie = false;
-      try {
+    boolean takingOverHandlingSender = false;
+
+    while(true) { // main loop 
+
+      if (clientRole == ClientRoles.RECEIVER) { 
+
+        boolean readLocked = false;
+        boolean readLockTimedOut = false;
 
         while(true) {
 
-          System.out.println();
-          log("Audio receive count: " + audioReceiveCount++);
-          log("Initializing sound storage array of length " + getArrayLength());
-          soundBytes = new byte[getArrayLength()]; 
-          log("Waiting for write lock.");
-          lock.writeLock().lock(); // lock soundBytes so it can't be read by other ServerThreads.
+          // Check whether we are supposed to take over as sender-client handler thread (SCHT) ie because the current SCHT said there was problem with its sender client.
 
-          try {
+          log("failoverInfo.isFailed(): " + failoverInfo.isFailed() + " failoverInfo.getUdpPort(): " + failoverInfo.getUdpPort());
+          if (failoverInfo.isFailed() && udpPort == failoverInfo.getUdpPort()) { 
+            log("Taking over as sender handler thread. Changing client role to sender client.");
+            //failoverInfo.setNeedFailover(false);
+            clientRole = ClientRoles.SENDER; 
+            takingOverHandlingSender = true;
+            break;
+          }
 
-            log("Write lock obtained.");
+          //lock.readLock().lock(); // lock soundBytes so it can't be written by the ServerThread handling sender client.
 
-            try {
-              Thread.sleep(2000);
-            } catch (InterruptedException e) { 
-              e.printStackTrace();
+          int timeout = 10;
+
+          try { 
+            log("Waiting for read lock.");
+            readLocked = lock.readLock().tryLock(timeout, TimeUnit.SECONDS); // lock soundBytes so it can't be written by the ServerThread handling sender client.
+
+            if (readLocked)
+              log("Read lock obtained.");
+            else { 
+              log("Timed out waiting for read lock");
+              readLockTimedOut = true;
             }
 
-            tcpSend("READY_TO_RECEIVE");
-            String reply = tcpListen();
-            //String reply = tcpListenInTimeoutLoop();
-            //if (reply == "READY_TO_SEND")
+          } catch (InterruptedException e) { 
+            e.printStackTrace();
+            //continue;
+          }
 
-            if (reply == null) {
-              log("Lost connection with sender client");
-              lostConnection = true; 
-              failOver();
-              iShouldDie = true;
-              break;
-            } else if (reply.equals("READY_TO_SEND"))
-              udpReceiveAudioFromClient(); // write soundBytes
-
-              // boolean successful = udpReceiveAudioFromClient(); // write soundBytes
-              // if (!successful) {
-              //   failOver();
-              //   iShouldDie = true;
-              //   break; 
-              // } 
-
-
+          try {
+            tcpWaitForMessage("READY_FOR_ARRAY_LENGTH"); 
+            //tcpSend(new Integer(getArrayLength()).toString());
+            log("byteStream.size(): " + byteStream.size());
+            tcpSend(new Integer(byteStream.size()).toString());
+            tcpSend("READY_FOR_UDP_PORT"); // race condition?
+            String reply = tcpListen(); // todo: check for null
+            int port = Integer.parseInt(reply);
+            log("Received receiver's UDP port: " + port);
+            udpSetUpSenderSocket();
+            tcpWaitForMessage("READY_TO_RECEIVE");  
+            //tcpSendArrayLength();
+            udpSendSoundBytesToClient(port);
           } finally {
-
-            lock.writeLock().unlock(); // unlock soundBytes.
-            log("Write lock released.");
-
+            if (readLocked) { 
+              lock.readLock().unlock(); 
+              log("Read lock released.");
+            }
           }       
+
+        } // end of while loop for receiver-client handler
+
+      } // end of if block for receiver-client handler
+ 
+
+      // Sender-client handler block 
+
+      if (clientRole == ClientRoles.SENDER) { 
+
+        // Check whether we are now taking over as sender-client handler thread (due to a failover situation) 
+        // and therefore need to reset our client to be a sender.
+
+        if (takingOverHandlingSender) { 
+          log("Notifying client it needs to be sender now.");
+          tcpExpectAndSend("READY_FOR_ARRAY_LENGTH", new Integer(resetClient).toString());  
         }
 
-        if (iShouldDie) { 
+        udpSetUpSocket();
+        tcpExpectAndSetArrayLength();
+        int audioReceiveCount = 0;
+        boolean lostConnection = false;
+        boolean iShouldDie = false;
+        try {
+
+          while(true) {
+
+            System.out.println();
+            log("Audio receive count: " + audioReceiveCount++);
+            log("Initializing sound storage array of length " + getArrayLength());
+            soundBytes = new byte[getArrayLength()]; 
+            log("Waiting for write lock.");
+            lock.writeLock().lock(); // lock soundBytes so it can't be read by other ServerThreads.
+
+            try {
+
+              log("Write lock obtained.");
+
+              try {
+                Thread.sleep(2000);
+              } catch (InterruptedException e) { 
+                e.printStackTrace();
+              }
+
+              tcpSend("READY_TO_RECEIVE");
+              String reply = tcpListen();
+              //String reply = tcpListenInTimeoutLoop();
+              //if (reply == "READY_TO_SEND")
+
+              if (reply == null) {
+                log("Lost connection with sender client");
+                lostConnection = true; 
+                failOver();
+                iShouldDie = true;
+                break;
+              } else if (reply.equals("READY_TO_SEND"))
+                udpReceiveAudioFromClient(); // write soundBytes
+
+                // boolean successful = udpReceiveAudioFromClient(); // write soundBytes
+                // if (!successful) {
+                //   failOver();
+                //   iShouldDie = true;
+                //   break; 
+                // } 
+
+
+            } finally {
+
+              lock.writeLock().unlock(); // unlock soundBytes.
+              log("Write lock released.");
+
+            }       
+
+          } // end of while loop for handling sender client
+
+          if (iShouldDie) { 
+            System.exit(0);
+          }
+
+        } finally { 
           System.exit(0);
         }
+        
+      } // end of if loop for sender-client handler
 
-      } finally { 
-        System.exit(0);
-      }
-      
-    }
+    } // end of main loop
 
-    if (clientRole == ClientRoles.RECEIVER) { 
-
-      boolean readLocked = false;
-
-      while(true) {
-        log("failoverInfo.isFailed(): " + failoverInfo.isFailed() + " failoverInfo.getUdpPort(): " + failoverInfo.getUdpPort());
-        if (failoverInfo.isFailed() && udpPort == failoverInfo.getUdpPort()) { 
-          log("Taking over as sender handler thread. Changing client role to sender client.");
-          //failoverInfo.setNeedFailover(false);
-        }
-
-        //lock.readLock().lock(); // lock soundBytes so it can't be written by the ServerThread handling sender client.
-
-        int timeout = 5;
-
-        try { 
-          log("Waiting for read lock.");
-          readLocked = lock.readLock().tryLock(timeout, TimeUnit.SECONDS); // lock soundBytes so it can't be written by the ServerThread handling sender client.
-
-          if (readLocked)
-            log("Read lock obtained.");
-          else { 
-            log("Timed out waiting for read lock");
-          }
-
-        } catch (InterruptedException e) { 
-          log("******** Read lock timeout *******");
-          continue;
-        }
-
-        try {
-          tcpWaitForMessage("READY_FOR_ARRAY_LENGTH"); 
-          //tcpSend(new Integer(getArrayLength()).toString());
-          log("byteStream.size(): " + byteStream.size());
-          tcpSend(new Integer(byteStream.size()).toString());
-          tcpSend("READY_FOR_UDP_PORT"); // race condition?
-          String reply = tcpListen(); // todo: check for null
-          int port = Integer.parseInt(reply);
-          log("Received receiver's UDP port: " + port);
-          udpSetUpSenderSocket();
-          tcpWaitForMessage("READY_TO_RECEIVE");  
-          //tcpSendArrayLength();
-          udpSendSoundBytesToClient(port);
-        } finally {
-          if (readLocked) { 
-            lock.readLock().unlock(); 
-            log("Read lock released.");
-          }
-        }       
-      }
-    }
   }
 
   private void failOver() {
