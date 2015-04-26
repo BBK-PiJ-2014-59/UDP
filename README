@@ -29,7 +29,7 @@ Ubuntu 14.04.2 LTS \n \l
 
 ** Instructions **
 
-There are three source files which must all be in the same folder: SoundServer.java, SoundServerThread.java, and SoundClient.java. Also in that folder should be a subfolder called 'util', which contains, the fourth file: SoundUtil.java. 
+There are four source files which must all be in the same folder: SoundServer.java, SoundServerThread.java, SoundClient.java and SharedFailoverInfo.java. Also in that folder should be a subfolder called 'util', which contains a fifth file: SoundUtil.java. 
 
 Known problems: The audio is pretty dodgy. It gets cut off and distorted. Failover can take several loops before the new sender client finally kicks in and you start hearing it.
 
