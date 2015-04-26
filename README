@@ -65,7 +65,7 @@ Step 5. Kill the first client (running in terminal window 2). After a few loops 
 
 C. An example with more failovers: 
 
-Get one client running as the sender, as above, and then get three more clients each receiving and playing in their own, respective, terminal windows, starting them each with a different wav file (the fourth client can be given the one the first one got). The sound will be bad when they're all playing at the same time but you should hear distinguish between them a bit. Kill the sender client and wait for client 2 to kick in as the new sender and client 3 to start playing the file client 2 started with. Then kill client 2 and client 3 should take over, leaving client 4 playing the file client 3 started with. And so on and so forth...
+Get one client running as the sender, as above, and then get three more clients each receiving and playing in their own, respective, terminal windows, starting them each with a different wav file (the fourth client can be given the one the first one got). The sound will be bad when they're all playing at the same time but you should be able to tell them apart. Now kill the sender client (client 1) and wait for client 2 to kick in as the new sender and client 3 to start playing the file client 2 started with. Then kill client 2 and client 3 should take over, leaving client 4 playing the file client 3 started with. And so on and so forth...
 
  
 
