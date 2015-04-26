@@ -160,6 +160,7 @@ public class SoundServerThread extends Thread {
         if (takingOverHandlingSender) { 
           log("Notifying client it needs to be sender now.");
           tcpExpectAndSend("READY_FOR_ARRAY_LENGTH", new Integer(resetClient).toString());  
+          
         }
 
         udpSetUpSocket();
@@ -363,52 +364,16 @@ public class SoundServerThread extends Thread {
     }
   }
 
-  private void tcpWaitForMessage(String message) {
+  private String tcpWaitForMessage(String message) { // todo: add checking to this. Did we get what we expected?
+    String received = null;
     log("Waiting for TCP message: " + message);
     try {
-      message = bufferedReader.readLine();
-      log("Received TCP message: " + message);
+      received = bufferedReader.readLine();
+      log("Received TCP message: " + received);
     } catch (IOException e) {
       e.printStackTrace();
     }
-  }
-
-  private void mcBroadcastAudio() {
-    // byte[] dummy = new byte[0];
-    DatagramPacket mcPacket; 
-
-    log("Broadcasting audio to receiver clients.");
-
-    int i = 0;
-
-    while (i < soundBytes.length - udpMaxPayload) {
-      //log("i: " + i);
-      mcPacket = new DatagramPacket(soundBytes, i, udpMaxPayload, mcGroup, mcPort);
-      try {
-        mcSocket.send(mcPacket);
-      } catch (IOException e) {
-        e.printStackTrace();
-      }
-      i += udpMaxPayload;
-    }
-  }
-
-  private void mcTestSend() { //  
-    byte[] dummy = new byte[0];
-    DatagramPacket mcPacket = new DatagramPacket(dummy, 0, mcGroup, mcPort);
-    int i = 0;
-    while(true) { 
-      ++i;
-      byte[] bytes = ("multicast test " + i).getBytes(); 
-      mcPacket.setData(bytes);
-      mcPacket.setLength(bytes.length);
-      try { 
-        mcSocket.send(mcPacket);
-        log(""+i);
-      } catch (IOException e) { 
-        e.printStackTrace();
-      }
-    }
+    return received;
   }
 
   private void udpSetTimeout(int ms) { 
@@ -536,12 +501,16 @@ public class SoundServerThread extends Thread {
   }
 
   private void tcpExpectAndSetArrayLength() { 
-    String request = tcpExpectAndSend(ClientRequests.ACK_LENGTH.toString(), Replies.ACK_LENGTH.toString()); // todo: check length ok before ack?
-    Pattern p = Pattern.compile("\\d+");
-    Matcher m = p.matcher(request);
-    m.find();
-    setArrayLength(Integer.parseInt(m.group(0)));
-    log("Array length set to " + getArrayLength());
+    String message = tcpExpectAndSend(ClientRequests.ACK_LENGTH.toString(), Replies.ACK_LENGTH.toString()); // todo: check length ok before ack?
+    if (message != null) { 
+      Pattern p = Pattern.compile("\\d+");
+      Matcher m = p.matcher(message);
+      m.find();
+      setArrayLength(Integer.parseInt(m.group(0)));
+      log("Array length set to " + getArrayLength());
+    } else { 
+      error("Array length can't be set to specified value: " + message);
+    }
   }
 
   private void setArrayLength(int len) { 
@@ -553,18 +522,22 @@ public class SoundServerThread extends Thread {
   }
 
   private String tcpExpectAndSend(String expected, String sendThis) { 
-    String request = null;
-    log("Waiting for '" + expected + "' request from client.");
-    request = tcpListen();
-    log("Message from client received.");
-    if (request.startsWith(expected)) {
-      log("Message from client was as expected.");
-      printWriter.println(sendThis);
-      log("Sent this to client: " + sendThis);
-    } else {
-      log("Client sent this instead of '" + expected + "': " + request);
+    String message = null;
+    log("Waiting for message: " + expected);
+    message = tcpListen();
+
+    log("Message received: " + message);
+
+    if (message != null) { 
+      if (message.startsWith(expected)) {
+        printWriter.println(sendThis);
+        log("Replied with: " + sendThis);
+      } else {
+        log("Unexpected message. Not replying.") ;
+      }
     }
-    return request; 
+
+    return message; 
   }
 
   private void tcpSend(String message) { 
@@ -611,10 +584,12 @@ public class SoundServerThread extends Thread {
     }
   }
 
-
-
   private void log(String msg) {
     logger(programName + "-" + getId(), msg);
+  }
+
+  private void error(String msg) { // only use this when we shouldn't have gotten somewhere.
+    logger(programName + "-" + getId() + ": ERROR",  msg);
   }
 
 }

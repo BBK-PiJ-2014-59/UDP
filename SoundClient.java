@@ -44,6 +44,8 @@ public class SoundClient {
   private static int mcPort = 10000;
 
   private static final int udpMaxPayload = 512; // Seems best practice not to exceeed this.
+
+  private static int resetClient = -1; // This needs to be the same on the client and server thread for failover purposes. 
   
   private enum Role {
     NOT_SET,
@@ -66,9 +68,8 @@ public class SoundClient {
   }
 
   byte[] soundBytesToSend; // if sender
-  byte[] soundBytesToPlay; // if receiver
+  byte[] soundBytes; // if receiver
 
-  byte[] soundBytes;
   private int arrayLength; // todo: change variable name?
 
   public SoundClient() {
@@ -94,57 +95,67 @@ public class SoundClient {
     soundClient.requestAndSetUdpPort();
     soundClient.setUpUdpSending();
 
+    // main loop:
 
-    if (soundClient.getRole() == Role.SENDER) { 
-      soundClient.readSoundFileIntoByteArray(audioFilename);
-      soundClient.tcpSendArrayLength();
-      int audioSendCount = 0;
-      while(true) { 
-        System.out.println();
-        soundClient.log("Audio send count: " + audioSendCount++);
-        String reply = soundClient.tcpWaitForMessage("READY_TO_RECEIVE");
-        if (reply == null) {
-          soundClient.log("Lost connection with receiver on server thread.");
-          break;
+    while(true) {  
+
+      if (soundClient.getRole() == Role.SENDER) { 
+        soundClient.readSoundFileIntoByteArray(audioFilename);
+        soundClient.tcpSendArrayLength();
+        int audioSendCount = 0;
+        
+        // sender loop:
+
+        while(true) { 
+          System.out.println();
+          soundClient.log("Audio send count: " + audioSendCount++);
+          String reply = soundClient.tcpWaitForMessage("READY_TO_RECEIVE");
+          if (reply == null) {
+            soundClient.error("Lost connection with receiver on server thread.");
+            //break;
+            System.exit(0);
+          }
+          soundClient.tcpSend("READY_TO_SEND");
+          try {
+            Thread.sleep(1000); // todo: remove after testing?
+          } catch (InterruptedException e) {
+            e.printStackTrace();
+          }
+          soundClient.udpSendSoundBytesToServerThread();
         }
-        soundClient.tcpSend("READY_TO_SEND");
-        try {
-          Thread.sleep(1000); // todo: remove after testing?
-        } catch (InterruptedException e) {
-          e.printStackTrace();
-        }
-        soundClient.udpSendSoundBytesToServerThread();
       }
-    }
 
-    else if (soundClient.getRole() == Role.RECEIVER) { 
-      soundClient.udpSetUpReceiverSocket();
-      while(true) {
+      else if (soundClient.getRole() == Role.RECEIVER) { 
+        soundClient.udpSetUpReceiverSocket();
 
-        System.out.println();
-        soundClient.tcpSend("READY_FOR_ARRAY_LENGTH"); // todo: what if this is sent before ServerThread does tcpWaitForMessage("READY_FOR_ARRAY_LENGTH")? Not heard!!
-        String length = soundClient.tcpListen(); // todo: what if connection is broken and length is null? Add exception handling to tcpListen();
-        soundClient.log("Received array length: " + length);
-        soundClient.setArrayLength(Integer.parseInt(length)); 
-        soundClient.soundBytes = new byte[soundClient.getArrayLength()];
-        soundClient.tcpWaitForMessage("READY_FOR_UDP_PORT");
-        soundClient.tcpSend(new Integer(soundClient.getUdpReceiverPort()).toString());
-        soundClient.tcpSend("READY_TO_RECEIVE"); // 
-        soundClient.udpReceiveAudioFromSender();
-        //soundClient.playAudio(soundClient.soundBytes); // should this be non-threaded?
-        soundClient.playAudio2(soundClient.soundBytes); // should this be non-threaded?
-        //soundClient.playAudio4(soundClient.soundBytes); // should this be non-threaded?
-        //playTest();
-        /*
-        try {
-          soundClient.playClip2(soundClient.soundBytes);
-        } catch (Exception e) { 
-          e.printStackTrace();
-        }
-        */
-      }
-    }
+        // receiver loop:
 
+        while(true) {
+
+          System.out.println();
+          soundClient.tcpSend("READY_FOR_ARRAY_LENGTH"); // todo: what if this is sent before ServerThread does tcpWaitForMessage("READY_FOR_ARRAY_LENGTH")? Not heard!!
+          String length = soundClient.tcpListen(); // todo: what if connection is broken and length is null? Add exception handling to tcpListen();
+          soundClient.log("Received array length: " + length);
+          soundClient.setArrayLength(Integer.parseInt(length)); 
+
+          if (soundClient.getArrayLength() == resetClient) { 
+            // This means there is a failover situation.
+            // Become a sender instead of a receiver.
+            soundClient.setRole(Role.SENDER);
+            soundClient.log("Role changing from RECEIVER to SENDER");
+            break;
+          }
+
+          soundClient.soundBytes = new byte[soundClient.getArrayLength()];
+          soundClient.tcpWaitForMessage("READY_FOR_UDP_PORT");
+          soundClient.tcpSend(new Integer(soundClient.getUdpReceiverPort()).toString());
+          soundClient.tcpSend("READY_TO_RECEIVE"); 
+          soundClient.udpReceiveAudioFromSender();
+          soundClient.playAudio(soundClient.soundBytes); // rename
+
+        } // end of receiver loop
+      } // end of receiver block
+    } // end of main while loop 
   }
 
 
@@ -294,137 +305,8 @@ public class SoundClient {
     }
   }
 
-  private byte[] getSoundBytesToSend() { 
-    return soundBytesToSend;
-  }
 
-  private byte[] getSoundBytesToPlay() { 
-    return soundBytesToPlay;
-  }
-
-  public static void playTest() {
-    try {
-        String filename = "Roland-JX-8P-Bell-C5.wav";
-        File yourFile = new File(filename);
-        AudioInputStream stream; // input stream with format and length
-        AudioFormat format;
-        DataLine.Info info;
-        Clip clip;
-
-        stream = AudioSystem.getAudioInputStream(yourFile);
-        format = stream.getFormat();
-        info = new DataLine.Info(Clip.class, format);
-        clip = (Clip) AudioSystem.getLine(info);
-        clip.open(stream);
-        clip.start();
-        do {
-          Thread.sleep(1);
-        } while (clip.isActive());
-    }
-    catch (Exception e) {
-      e.printStackTrace();
-    }
-  }
-
-private static void playClip(File clipFile) throws IOException, UnsupportedAudioFileException, LineUnavailableException, InterruptedException
-{
-  class AudioListener implements LineListener {
-    private boolean done = false;
-    @Override public synchronized void update(LineEvent event) {
-      Type eventType = event.getType();
-      if (eventType == Type.STOP || eventType == Type.CLOSE) {
-        done = true;
-        notifyAll();
-      }
-    }
-    public synchronized void waitUntilDone() throws InterruptedException {
-      while (!done) { wait(); }
-    }
-  }
-  AudioListener listener = new AudioListener();
-  AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(clipFile);
-  try {
-    Clip clip = AudioSystem.getClip();
-    clip.addLineListener(listener);
-    clip.open(audioInputStream);
-    try {
-      clip.start();
-      listener.waitUntilDone();
-    } finally {
-      clip.close();
-    }
-  } finally {
-    audioInputStream.close();
-  }
-}
-
-private void playClip2(byte[] bytes) throws IOException, UnsupportedAudioFileException, LineUnavailableException, InterruptedException
-{
-  class AudioListener implements LineListener {
-    private boolean done = false;
-    @Override public synchronized void update(LineEvent event) {
-      Type eventType = event.getType();
-      if (eventType == Type.STOP || eventType == Type.CLOSE) {
-        done = true;
-        notifyAll();
-      }
-    }
-    public synchronized void waitUntilDone() throws InterruptedException {
-      while (!done) { wait(); }
-    }
-  }
-  AudioListener listener = new AudioListener();
-    int sampleRate = 44100;
-    int sampleSize = 16;
-    int channels = 2;
-    boolean signed = true;
-    boolean bigEndian = false;
-
-    AudioFormat format = new AudioFormat(sampleRate, sampleSize, channels, signed, bigEndian);
-    log("Audio format: " + format);
-  DataLine.Info info;
-  Clip clip;
-      info = new DataLine.Info(Clip.class, format);
-      clip = (Clip) AudioSystem.getLine(info);
-      clip.addLineListener(listener);
-      clip.open(format, bytes, 0, bytes.length);
-    try {
-      clip.start();
-      listener.waitUntilDone();
-    } finally {
-      clip.close();
-    }
-}
-
-  private void playAudio3(byte[] bytes) {
-
-    log("Playing audio byte array of length " + bytes.length);
-    try {
-
-    int sampleRate = 44100;
-    int sampleSize = 16;
-    int channels = 2;
-    boolean signed = true;
-    boolean bigEndian = false;
-
-    AudioFormat format = new AudioFormat(sampleRate, sampleSize, channels, signed, bigEndian);
-    log("Audio format: " + format);
-      DataLine.Info info;
-      Clip clip;
-
-      info = new DataLine.Info(Clip.class, format);
-      clip = (Clip) AudioSystem.getLine(info);
-      clip.open(format, bytes, 0, bytes.length);
-      clip.start();
-      do {
-        Thread.sleep(1);
-      } while (clip.isActive());
-    } catch (Exception e) {
-      e.printStackTrace();
-    }
-  }
-
-  private void playAudio2(byte[] bytes) {
+  private void playAudio(byte[] bytes) {
 
     log("Playing audio byte array of length " + bytes.length);
     try {
@@ -447,36 +329,6 @@ private void playClip2(byte[] bytes) throws IOException, UnsupportedAudioFileExc
         Thread.sleep(1);
       } while (clip.isActive());
     } catch (Exception e) {
-      e.printStackTrace();
-    }
-  }
-
-  private void playAudio(byte[] bytes) {
-
-    log("Playing audio byte array of length " + bytes.length);
-    int sampleRate = 44100;
-    int sampleSize = 16;
-    int channels = 2;
-    boolean signed = true;
-    boolean bigEndian = false;
-
-    AudioFormat format = new AudioFormat(sampleRate, sampleSize, channels, signed, bigEndian);
-    log("Audio format: " + format);
-
-    try {
-      DataLine.Info dataLineInfo = new DataLine.Info(SourceDataLine.class, format);
-      SourceDataLine sourceDataLine = (SourceDataLine) AudioSystem.getLine(dataLineInfo);
-      log("Line info: " + sourceDataLine);
-      sourceDataLine.open(format);
-      FloatControl volumeControl = (FloatControl) sourceDataLine.getControl(FloatControl.Type.MASTER_GAIN);
-      volumeControl.setValue(6.0206f);
-      sourceDataLine.start();
-      sourceDataLine.open(format);
-      sourceDataLine.start();
-      sourceDataLine.write(bytes, 0, bytes.length);
-      sourceDataLine.drain();
-      sourceDataLine.close();
-    } catch (Exception e) { // todo: make exceptions more specific
       e.printStackTrace();
     }
   }
@@ -536,22 +388,6 @@ private void playClip2(byte[] bytes) throws IOException, UnsupportedAudioFileExc
     }
   }
 
-
-
-  private void mcSetUpReceiver() {
-    log("Setting up multicast receiver.");
-    try {
-      mcSocket = new MulticastSocket(mcPort);
-      mcGroup = InetAddress.getByName(mcAddress);
-      mcSocket.joinGroup(mcGroup);
-    } catch (UnknownHostException e) {
-      e.printStackTrace();
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
-  }
-
-
   private void setUpUdpSending() { 
     try { 
       udpSocket = new DatagramSocket();
@@ -604,6 +440,10 @@ private void playClip2(byte[] bytes) throws IOException, UnsupportedAudioFileExc
 
   private Role getRole() { 
     return role;
+  }
+
+  private void setRole(Role role) { 
+    this.role = role;
   }
 
   private int getUdpPort() { 
@@ -701,6 +541,11 @@ private void playClip2(byte[] bytes) throws IOException, UnsupportedAudioFileExc
 
   private void log(String msg) { 
     logger(loggingName + "-" + getId(), msg);
+  }
+
+  // only use this when we shouldn't have gotten somewhere:
+  private void error(String msg) { 
+    logger(loggingName + "-" + getId() + ": ERROR",  msg);
   }
 
 }
