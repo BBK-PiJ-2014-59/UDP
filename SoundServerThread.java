@@ -4,6 +4,9 @@ import java.util.*;
 import java.util.regex.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock; 
 import javax.sound.sampled.*; // for testing only
+import java.util.concurrent.TimeUnit; 
+
+
 
 import static util.SoundUtil.*;
 
@@ -147,16 +150,37 @@ public class SoundServerThread extends Thread {
     }
 
     if (clientRole == ClientRoles.RECEIVER) { 
+
+      boolean readLocked = false;
+
       while(true) {
+        log("failoverInfo.isFailed(): " + failoverInfo.isFailed() + " failoverInfo.getUdpPort(): " + failoverInfo.getUdpPort());
         if (failoverInfo.isFailed() && udpPort == failoverInfo.getUdpPort()) { 
           log("Taking over as sender handler thread. Changing client role to sender client.");
           //failoverInfo.setNeedFailover(false);
         }
-        log("Waiting for read lock.");
-        lock.readLock().lock(); // lock soundBytes so it can't be written by the ServerThread handling sender client.
+
+        //lock.readLock().lock(); // lock soundBytes so it can't be written by the ServerThread handling sender client.
+
+        int timeout = 5;
+
+        try { 
+          log("Waiting for read lock.");
+          readLocked = lock.readLock().tryLock(timeout, TimeUnit.SECONDS); // lock soundBytes so it can't be written by the ServerThread handling sender client.
+
+          if (readLocked)
+            log("Read lock obtained.");
+          else { 
+            log("Timed out waiting for read lock");
+          }
+
+        } catch (InterruptedException e) { 
+          log("******** Read lock timeout *******");
+          continue;
+        }
+
         try {
           tcpWaitForMessage("READY_FOR_ARRAY_LENGTH"); 
-          log("Read lock obtained.");
           //tcpSend(new Integer(getArrayLength()).toString());
           log("byteStream.size(): " + byteStream.size());
           tcpSend(new Integer(byteStream.size()).toString());
@@ -169,8 +193,10 @@ public class SoundServerThread extends Thread {
           //tcpSendArrayLength();
           udpSendSoundBytesToClient(port);
         } finally {
-          lock.readLock().unlock(); 
-          log("Read lock released.");
+          if (readLocked) { 
+            lock.readLock().unlock(); 
+            log("Read lock released.");
+          }
         }       
       }
     }

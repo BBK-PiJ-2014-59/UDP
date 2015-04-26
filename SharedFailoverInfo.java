@@ -10,7 +10,7 @@ public class SharedFailoverInfo {
   public SharedFailoverInfo(int udpPortOfFirstThread) {
     failoverLock = new ReentrantLock();
     needFailover = false;
-    udpPort = udpPortOfFirstThread + 1;
+    udpPort = udpPortOfFirstThread;
   }
 
   void lock() { 
